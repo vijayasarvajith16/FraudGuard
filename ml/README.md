@@ -64,10 +64,10 @@ Record the cascade line of the evaluation output (recall, precision, deep-scan t
 python src/evaluate.py --data <csv> \
   --quick-model models:/fraudguard-quick-scan@candidate \
   --deep-model  models:/fraudguard-deep-scan@candidate \
-  --min-recall 0.75 --min-pr-auc 0.75 [--min-precision 0.5] [--log-to-mlflow] [--output report.json]
+  --min-recall 0.75 --min-pr-auc 0.78 --min-precision 0.85 [--log-to-mlflow] [--output report.json]
 ```
 
-Exit code `0` = gates passed, `1` = a gate failed, `2` = error (e.g. model not found). In `cascade` mode, recall and precision are the cascade's, and PR-AUC is the deep-scan model's. Phase 14 runs this in CI before promotion.
+The floors come from the measured production results in [docs/ml-results.md](../docs/ml-results.md). Exit code `0` = gates passed, `1` = a gate failed, `2` = error (e.g. model not found). In `cascade` mode, recall and precision are the cascade's, and PR-AUC is the deep-scan model's. Phase 14 runs this in CI before promotion.
 
 ## Local development (no training)
 
