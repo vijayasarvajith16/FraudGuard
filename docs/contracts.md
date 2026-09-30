@@ -1,6 +1,6 @@
 # FraudGuard Service Contracts
 
-**Status:** authoritative. Contract version `1.0.0`.
+**Status:** authoritative. Contract version `1.1.0`.
 Change this file first, then the code. Any change that breaks a consumer bumps the major version and the message `version` field.
 
 This document defines every HTTP API, the transaction data model, the RabbitMQ topology, the risk policy, and failure behaviour. If code and this file disagree, the code is wrong.
@@ -43,8 +43,9 @@ Each service owns its own database in the shared MongoDB instance and never read
 ### 0.4 Authentication (JWT)
 - Issued by auth-service, algorithm **HS256**, secret `JWT_SECRET` (min 32 bytes), shared with services that verify tokens.
 - Claims: `sub` (userId), `email`, `role` (`user` \| `admin`), `iss` = `fraudguard-auth`, `aud` = `fraudguard`, `iat`, `exp`.
-- Access-token lifetime: `JWT_EXPIRES_IN` (default `15m`). No refresh tokens in this prototype; the client logs in again.
+- Access-token lifetime: `JWT_EXPIRES_IN` (default `15m`). The docker-compose demo stack sets `2h` so a demo is not interrupted by re-logins.
 - Verifiers must check the signature, `iss`, `aud` and `exp`, and allow at most 30 s of clock skew.
+- **Deliberate scope cut: there are no refresh tokens and no logout endpoint.** Tokens are stateless and short-lived; "logout" is the client discarding its token. A production system would add rotating refresh tokens (httpOnly cookie) and a server-side revocation list. These are left out to keep the prototype focused on the fraud pipeline, not because they were overlooked.
 
 ### 0.5 Error format
 Every non-2xx response from every service (Node and Python) uses this envelope:
@@ -98,7 +99,12 @@ The anonymized Kaggle Credit Card Fraud features. The same object is used by the
 - Keys: exactly `Time`, `V1`…`V28`, `Amount` (30 keys). Unknown keys are rejected with `400`.
 - All values are finite numbers. `Time >= 0`, `Amount >= 0`.
 - On a transfer, transaction-service **always overwrites `Amount`** with the transaction amount.
-- If a client omits `features` entirely, transaction-service builds a neutral vector: `V1..V28 = 0` (the PCA mean), `Time` = seconds since UTC midnight, `Amount` = amount. This is a demo simplification because the real features are anonymized; the replay tool (Phase 7) supplies real rows.
+- If a client omits `features` entirely, transaction-service builds a neutral vector: `V1..V28 = 0` (the PCA mean), `Time` = seconds since UTC midnight, `Amount` = amount. This is a demo simplification because the real features are anonymized.
+- **Consequence:** a transfer without features is almost always scored normal and approved immediately. Flagged flows are demonstrated with real feature rows, supplied either by:
+  1. the frontend transfer form's **Risk profile** selector (`Default`, `Normal sample`, `Suspicious sample`, `Known fraud sample`). The samples are real rows from the dataset, bundled in `frontend/src/demo/sampleFeatures.json`, which `tools/make_demo_samples.py` generates (a few dozen rows, no labels beyond the category). The form tells the user that `Default` will normally be approved; or
+  2. `tools/replay.py`, which streams dataset rows through the gateway.
+
+  Either way, features always reach the server through `POST /api/transactions`. No client talks to a scan service directly.
 
 ---
 
@@ -441,7 +447,11 @@ At startup the service checks `0 < medium < high < critical < 1` and refuses to 
 | HIGH | `OTP_STEP_UP` | Hold funds; create a 6-digit OTP (hashed, 5 min expiry, 3 attempts); simulated notification carrying the code. | `AWAITING_OTP` |
 | CRITICAL | `BLOCK_AND_FREEZE` | Freeze the sender's account; create a manual-review case; notify the user. | `ACCOUNT_FROZEN` |
 
-- The mapping is loaded from `TIER_ACTIONS_PATH` (default `./src/config/tierActions.json`). It is re-read when the file changes, and on `POST /alerts/admin/config/reload`. An invalid file is rejected and the last good mapping stays active (logged at `error`). No model redeploy is needed to change policy.
+- The mapping is loaded from `TIER_ACTIONS_PATH` (default `./src/config/tierActions.json`). It is reloaded in exactly two ways:
+  1. **Polling:** every `TIER_ACTIONS_POLL_SECONDS` (default `30`; `0` disables it), the service hashes the file and reloads it if the content changed. Polling is used instead of `fs.watch` because Kubernetes ConfigMap volumes update through a symlink swap, which file watchers miss.
+  2. **Manual:** `POST /alerts/admin/config/reload` reloads immediately and returns the active mapping.
+
+  An invalid file is rejected and the last good mapping stays active (logged at `error`, `tier_actions_config_reloads_total{result="invalid"}`). Changing policy never requires redeploying a model or restarting a service.
 - The OTP outcome resolves `AWAITING_OTP`: a correct code → `APPROVED`; too many attempts or expiry → `BLOCKED`. A sweeper runs every 60 s to expire stale OTPs.
 - A manual review resolves `ACCOUNT_FROZEN`: admin `APPROVE` → `APPROVED` and the account is unfrozen; `REJECT` → `BLOCKED` and the account stays frozen until an admin unfreezes it.
 
@@ -497,6 +507,7 @@ Metrics: `alerts_created_total{tier,action}`, `otp_verifications_total{result="s
 | anything matching `/internal`, `/metrics`, `/health/live` under `/api/*`, or not listed | `404` | Explicit deny. Scan services are unreachable. |
 
 - General rate limit: 20 req/s per IP, burst 40 → `429` with the §0.5 envelope.
+- The frontend talks **only** to `/api/*` on the gateway. It tracks the outcome of a flagged transfer by polling `GET /api/transactions/{id}` (every 2 s, backing off to 10 s, stopping at a terminal status or `AWAITING_OTP`). It never calls a scan service, RabbitMQ or an `/internal` route, and the gateway has no route to them.
 - CORS: allow the origins in `CORS_ALLOWED_ORIGINS`; methods `GET, POST, PATCH, OPTIONS`; headers `Authorization, Content-Type, Idempotency-Key, X-Request-Id`; expose `X-Request-Id, Idempotent-Replayed`.
 - `X-Request-Id`: `$http_x_request_id` if present, otherwise `$request_id`; forwarded upstream and returned to the client.
 - Upstream timeouts: connect 2 s, read 10 s. Max body 100 kB.
@@ -519,6 +530,21 @@ Metrics: `alerts_created_total{tier,action}`, `otp_verifications_total{result="s
 
 Principle: **every uncertainty resolves toward review, never toward approval.**
 
+### 9.1 Retention and timeouts (and why they differ)
+
+| Item | Lifetime | Why |
+|---|---|---|
+| `Idempotency-Key` record | 24 h (TTL index) | Must outlive any realistic client retry window (mobile reconnects, replay after a crash), but is only a dedup aid, not a record of truth, so it can expire. |
+| OTP challenge | 5 min, 3 attempts | A security credential: short-lived to limit brute force and phishing. Expiry resolves the transaction to `BLOCKED` (toward safety), and the user can retry the transfer. |
+| Manual review case | No TTL | Resolving a `CRITICAL` case needs a human decision. Expiring it would silently decide the outcome, so it stays open until an admin acts; `review_cases_open` is monitored instead. |
+| `processed_events` (alerting dedup) | 7 days | Longer than any retry or redelivery path (max 3 retries × 5 s, plus DLQ replay by an operator). |
+| Transactions and alerts | Kept (no TTL) | Audit trail. |
+| JWT access token | 15 min (2 h in the compose demo) | Stateless and not revocable, so kept short. |
+
+### 9.2 Out of scope (explicitly)
+- **No deletion of transactions and no account closure.** Transactions are append-only records; the only way to resolve held funds is the state machine in §2.3 (settle on `APPROVED`, release on `BLOCKED`). Because no API can delete a transaction or close an account while funds are held, the "orphaned hold" case cannot occur.
+- No refresh tokens or logout (§0.4), no multi-currency, no real notification delivery (notifications and OTPs are simulated and stored).
+
 ---
 
 ## 10. Environment variables (summary)
@@ -531,8 +557,9 @@ Every service reads configuration only from the environment and ships a `.env.ex
 | transaction | `MONGO_URI`, `MONGO_DB=fraudguard_transactions`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `AUTH_SERVICE_URL`, `QUICK_SCAN_URL`, `QUICK_SCAN_TIMEOUT_MS=300`, `OUTBOX_RELAY_INTERVAL_MS=5000` |
 | quick-scan | `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD`, `MODEL_URI=models:/fraudguard-quick-scan@production`, `ALLOW_LOCAL_MODEL_FALLBACK=false`, `LOCAL_MODEL_PATH`, `QUICK_SCAN_THRESHOLD` (optional override) |
 | deep-scan | the MLflow variables above, `MODEL_URI=models:/fraudguard-deep-scan@production`, `ALLOW_LOCAL_MODEL_FALLBACK=false`, `LOCAL_MODEL_PATH`, `RABBITMQ_URL`, `TIER_MEDIUM_MIN=0.30`, `TIER_HIGH_MIN=0.70`, `TIER_CRITICAL_MIN=0.90`, `MAX_RETRIES=3`, `PREFETCH=10` |
-| alerting | `MONGO_URI`, `MONGO_DB=fraudguard_alerts`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `TRANSACTION_SERVICE_URL`, `TIER_ACTIONS_PATH`, `OTP_TTL_SECONDS=300`, `OTP_MAX_ATTEMPTS=3`, `EXPOSE_SIMULATED_OTP=false`, `MAX_RETRIES=3` |
+| alerting | `MONGO_URI`, `MONGO_DB=fraudguard_alerts`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `TRANSACTION_SERVICE_URL`, `TIER_ACTIONS_PATH`, `TIER_ACTIONS_POLL_SECONDS=30`, `OTP_TTL_SECONDS=300`, `OTP_MAX_ATTEMPTS=3`, `EXPOSE_SIMULATED_OTP=false`, `MAX_RETRIES=3` |
 | gateway | `CORS_ALLOWED_ORIGINS` |
 
 ## 11. Changelog
+- **1.1.0** (2026-09-30): no breaking changes. The refresh/logout scope cut is now documented; the frontend demo risk profiles and the no-direct-scan-access rule are specified; tier-action reload is specified precisely (hash polling + manual endpoint); added retention/timeout rationale and explicit out-of-scope items.
 - **1.0.0** (2026-09-30): initial contract.
