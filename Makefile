@@ -4,12 +4,12 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-NODE_SERVICES := auth-service transaction-service
+NODE_SERVICES := auth-service transaction-service alerting-service
 PY_SERVICES := quick-scan-service deep-scan-service
 # Python interpreter with the service dev requirements installed (e.g. an activated venv).
 PYTHON ?= python
 
-.PHONY: help up down ps logs test lint mongo-users test-integration ml-test ml-lint
+.PHONY: help up down ps logs test lint mongo-users test-integration gateway-test ml-test ml-lint
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -34,7 +34,17 @@ test: ## Run unit tests for every service
 	@set -e; for svc in $(PY_SERVICES); do echo "==> test $$svc"; (cd services/$$svc && $(PYTHON) -m pytest); done
 
 test-integration: ## Queue integration tests against the running compose RabbitMQ (throwaway vhosts)
-	@set -a; . ./.env; set +a; 	export RABBITMQ_TEST_URL="amqp://$$RABBITMQ_DEFAULT_USER:$$RABBITMQ_DEFAULT_PASS@127.0.0.1:$${RABBITMQ_HOST_PORT:-5672}"; 	export RABBITMQ_TEST_MGMT_URL="http://127.0.0.1:$${RABBITMQ_UI_HOST_PORT:-15672}"; 	npm --prefix services/transaction-service run test:integration && 	(cd services/deep-scan-service && $(PYTHON) -m pytest tests/test_consumer_integration.py)
+	@set -a; . ./.env; set +a; \
+	export RABBITMQ_TEST_URL="amqp://$$RABBITMQ_DEFAULT_USER:$$RABBITMQ_DEFAULT_PASS@127.0.0.1:$${RABBITMQ_HOST_PORT:-5672}"; \
+	export RABBITMQ_TEST_MGMT_URL="http://127.0.0.1:$${RABBITMQ_UI_HOST_PORT:-15672}"; \
+	npm --prefix services/transaction-service run test:integration && \
+	npm --prefix services/alerting-service run test:integration && \
+	(cd services/deep-scan-service && $(PYTHON) -m pytest tests/test_consumer_integration.py)
+
+gateway-test: ## Black-box tests of the running API gateway (routing, deny list, CORS, limits)
+	@set -a; . ./.env; set +a; \
+	GATEWAY_URL="http://127.0.0.1:$${GATEWAY_HOST_PORT:-8080}" GATEWAY_ALLOWED_ORIGIN="http://localhost:5173" \
+	$(PYTHON) -m pytest services/api-gateway/tests -q -p no:cacheprovider
 
 lint: ## Lint every service
 	@set -e; for svc in $(NODE_SERVICES); do echo "==> lint $$svc"; npm --prefix services/$$svc run lint; done

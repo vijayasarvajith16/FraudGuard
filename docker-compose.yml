@@ -33,6 +33,7 @@ services:
       # Per-service users, created by infra/mongo/init (first volume init, or `make mongo-users`).
       MONGO_AUTH_PASSWORD: ${MONGO_AUTH_PASSWORD:?set MONGO_AUTH_PASSWORD in .env}
       MONGO_TRANSACTIONS_PASSWORD: ${MONGO_TRANSACTIONS_PASSWORD:?set MONGO_TRANSACTIONS_PASSWORD in .env}
+      MONGO_ALERTS_PASSWORD: ${MONGO_ALERTS_PASSWORD:?set MONGO_ALERTS_PASSWORD in .env}
     ports:
       - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
     volumes:
@@ -148,6 +149,73 @@ services:
       resources:
         limits:
           memory: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  alerting-service:
+    build:
+      context: ./services/alerting-service
+    image: fraudguard/alerting-service:dev
+    container_name: fraudguard-alerting-service
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TRUST_PROXY: 1
+      MONGO_URI: mongodb://alerting_service:${MONGO_ALERTS_PASSWORD}@mongodb:27017/fraudguard_alerts?authSource=fraudguard_alerts&replicaSet=rs0
+      MONGO_DB: fraudguard_alerts
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-fraudguard}:${RABBITMQ_DEFAULT_PASS:-fraudguard-dev}@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?set INTERNAL_SERVICE_TOKEN in .env}
+      TRANSACTION_SERVICE_URL: http://transaction-service:3002
+      OTP_SECRET: ${OTP_SECRET:?set OTP_SECRET in .env}
+      # Demo stack: show the simulated OTP in the user's alert (never in a shared environment).
+      EXPOSE_SIMULATED_OTP: ${EXPOSE_SIMULATED_OTP:-true}
+      # Policy is bind-mounted: edit services/alerting-service/src/config/tierActions.json and it
+      # is picked up within TIER_ACTIONS_POLL_SECONDS, without a restart (docs/contracts.md §6.2).
+      TIER_ACTIONS_PATH: /app/policy/tierActions.json
+      TIER_ACTIONS_POLL_SECONDS: ${TIER_ACTIONS_POLL_SECONDS:-10}
+    volumes:
+      - ./services/alerting-service/src/config:/app/policy:ro
+    ports:
+      - "127.0.0.1:${ALERTING_HOST_PORT:-3003}:3003"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      transaction-service:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # Single public entry point (docs/contracts.md §8). Only this port is meant for clients.
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+    image: fraudguard/api-gateway:dev
+    container_name: fraudguard-api-gateway
+    environment:
+      NGINX_RESOLVER: 127.0.0.11
+      # The gateway itself (SPA served through it) and the Vite dev server (Phase 7).
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080 http://localhost:5173}
+    ports:
+      - "127.0.0.1:${GATEWAY_HOST_PORT:-8080}:8080"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      transaction-service:
+        condition: service_healthy
+      alerting-service:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 64m
     restart: unless-stopped
     logging: *default-logging
 

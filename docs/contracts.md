@@ -1,6 +1,6 @@
 # FraudGuard Service Contracts
 
-**Status:** authoritative. Contract version `1.3.0`.
+**Status:** authoritative. Contract version `1.4.0`.
 Change this file first, then the code. Any change that breaks a consumer bumps the major version and the message `version` field.
 
 This document defines every HTTP API, the transaction data model, the RabbitMQ topology, the risk policy, and failure behaviour. If code and this file disagree, the code is wrong.
@@ -466,7 +466,9 @@ At startup the service checks `0 < medium < high < critical < 1` and refuses to 
   2. **Manual:** `POST /alerts/admin/config/reload` reloads immediately and returns the active mapping.
 
   An invalid file is rejected and the last good mapping stays active (logged at `error`, `tier_actions_config_reloads_total{result="invalid"}`). Changing policy never requires redeploying a model or restarting a service.
-- The OTP outcome resolves `AWAITING_OTP`: a correct code → `APPROVED`; too many attempts or expiry → `BLOCKED`. A sweeper runs every 60 s to expire stale OTPs.
+- File format: `{ "version": 1, "tiers": { "<TIER>": { "action", "resultingStatus", "notifyUser", "openReviewCase"? } } }` with all four tiers present. Each action has exactly one valid resulting status (`LOG`/`NOTIFY` → `APPROVED`, `OTP_STEP_UP` → `AWAITING_OTP`, `BLOCK_AND_FREEZE` → `ACCOUNT_FROZEN`). `OTP_STEP_UP` and `BLOCK_AND_FREEZE` require `notifyUser: true`, and `openReviewCase: true` is required for, and only allowed on, `BLOCK_AND_FREEZE`. A file breaking any of these rules is invalid. The mapping can be changed (for example MEDIUM → `OTP_STEP_UP`), but it cannot describe an action whose effects contradict its status.
+- The OTP outcome resolves `AWAITING_OTP`: a correct code → `APPROVED`; too many attempts or expiry → `BLOCKED`. A sweeper runs every `OTP_SWEEP_INTERVAL_SECONDS` (60) and blocks transactions whose challenge expired or ran out of attempts, including any whose blocking call to transaction-service failed earlier.
+- OTP codes are 6 digits derived from `HMAC-SHA256(OTP_SECRET, "otp-code:" + transactionId)`: unpredictable without the secret, and stable across message redeliveries, so a retried message can never show the user a different code than the one stored. Only `HMAC-SHA256(OTP_SECRET, transactionId:code)` is stored, and verification compares in constant time.
 - A manual review resolves `ACCOUNT_FROZEN`: admin `APPROVE` → `APPROVED` and the account is unfrozen; `REJECT` → `BLOCKED` and the account stays frozen until an admin unfreezes it.
 
 ---
@@ -480,6 +482,17 @@ Alert object:
 { "id": "uuid", "userId": "uuid", "transactionId": "uuid", "riskTier": "HIGH", "action": "OTP_STEP_UP", "channel": "SIMULATED", "message": "Confirm your $42.50 transfer with the code sent to you.", "simulatedOtp": "123456", "read": false, "createdAt": "..." }
 ```
 `simulatedOtp` appears only when `EXPOSE_SIMULATED_OTP=true` (the demo default in docker-compose; `false` in any shared environment).
+Tier `LOG` alerts are stored for audit but are not user-visible: `GET /alerts` returns only alerts from notifying actions (`notifyUser: true`). All side effects are keyed by `transactionId` (one alert, one OTP challenge, one review case per transaction), so reprocessing a message creates nothing new.
+
+**Consumer (transactions.scored)**, following the rules of §3.5:
+1. Malformed or schema-invalid → dead-letter.
+2. `processed_events` already holds the `idempotencyKey` → ack (duplicate).
+3. Apply the tier's action: create the alert, OTP challenge or review case (idempotently).
+4. `PATCH` transaction-service: `status` = the action's resulting status, `riskScore` = probability, `riskTier`, `deepScan`, `action`, `source: alerting-service`.
+   - `200` → record the `idempotencyKey` in `processed_events`, then ack.
+   - `409 INVALID_TRANSITION` → the transaction was already moved on (e.g. finalized by an admin); record and ack.
+   - `404` → dead-letter (a data problem, not a transient one).
+   - `5xx`, timeout or network error → retry via `fraudguard.retry`, or dead-letter after `MAX_RETRIES`.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -526,6 +539,9 @@ Metrics: `alerts_created_total{tier,action}`, `otp_verifications_total{result="s
 - `X-Request-Id`: `$http_x_request_id` if present, otherwise `$request_id`; forwarded upstream and returned to the client.
 - Upstream timeouts: connect 2 s, read 10 s. Max body 100 kB.
 - JSON access log including the request ID, upstream time and status.
+- Errors produced by the gateway itself (`404` unknown route, `413`, `429`, `502`/`503`/`504` upstream failures) use the §0.5 envelope, with `requestId`.
+- Runs as a non-root user on port **8080**. `stub_status` is served only on the internal port **8090** (`/nginx_status`) for the Prometheus exporter; it is not published.
+- Security headers on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`. `server_tokens off`.
 
 ---
 
@@ -571,10 +587,11 @@ Every service reads configuration only from the environment and ships a `.env.ex
 | transaction | `MONGO_URI`, `MONGO_DB=fraudguard_transactions`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `AUTH_SERVICE_URL`, `QUICK_SCAN_URL`, `QUICK_SCAN_TIMEOUT_MS=300`, `OUTBOX_RELAY_INTERVAL_MS=5000`, `PENDING_RECOVERY_SECONDS=30` |
 | quick-scan | `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD`, `MODEL_URI=models:/fraudguard-quick-scan@production`, `ALLOW_LOCAL_MODEL_FALLBACK=false`, `LOCAL_MODEL_PATH`, `QUICK_SCAN_THRESHOLD` (optional override) |
 | deep-scan | the MLflow variables above, `MODEL_URI=models:/fraudguard-deep-scan@production`, `ALLOW_LOCAL_MODEL_FALLBACK=false`, `LOCAL_MODEL_PATH`, `RABBITMQ_URL`, `TIER_MEDIUM_MIN=0.30`, `TIER_HIGH_MIN=0.70`, `TIER_CRITICAL_MIN=0.90`, `MAX_RETRIES=3`, `PREFETCH=10` |
-| alerting | `MONGO_URI`, `MONGO_DB=fraudguard_alerts`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `TRANSACTION_SERVICE_URL`, `TIER_ACTIONS_PATH`, `TIER_ACTIONS_POLL_SECONDS=30`, `OTP_TTL_SECONDS=300`, `OTP_MAX_ATTEMPTS=3`, `EXPOSE_SIMULATED_OTP=false`, `MAX_RETRIES=3` |
-| gateway | `CORS_ALLOWED_ORIGINS` |
+| alerting | `MONGO_URI`, `MONGO_DB=fraudguard_alerts`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `TRANSACTION_SERVICE_URL`, `TIER_ACTIONS_PATH`, `TIER_ACTIONS_POLL_SECONDS=30`, `OTP_TTL_SECONDS=300`, `OTP_MAX_ATTEMPTS=3`, `EXPOSE_SIMULATED_OTP=false`, `MAX_RETRIES=3`, `PREFETCH=10`, `OTP_SECRET` (≥ 32 chars), `OTP_SWEEP_INTERVAL_SECONDS=60`, `TRANSACTION_SERVICE_TIMEOUT_MS=3000` |
+| gateway | `CORS_ALLOWED_ORIGINS` (space-separated exact origins), `NGINX_RESOLVER` (DNS for lazily-resolved upstreams; `127.0.0.11` in Docker) |
 
 ## 11. Changelog
+- **1.4.0** (2026-09-30): no breaking changes. tierActions.json format and consistency rules; OTP hashing (`OTP_SECRET`) and sweeper behaviour; LOG alerts are audit-only; the alerting consumer's handling of transaction-service responses; gateway error envelopes, ports, security headers and env vars.
 - **1.3.0** (2026-09-30): no breaking changes. MongoDB runs as a single-node replica set, and money movements are multi-document transactions; recovery of interrupted `PENDING` transfers; every service declares the full topology of the events it touches, with mandatory publishes; transaction-service readiness no longer depends on RabbitMQ (the outbox covers outages); clarified that redelivered scored events share `eventId`/score but not timestamps.
 - **1.2.0** (2026-09-30): no breaking changes. Added §4.1 model loading (pinned version download, native loading with a service-owned skops allowlist, required metadata, XGBoost best-iteration scoring) and changed model-load failure to fail-fast.
 - **1.1.0** (2026-09-30): no breaking changes. The refresh/logout scope cut is now documented; the frontend demo risk profiles and the no-direct-scan-access rule are specified; tier-action reload is specified precisely (hash polling + manual endpoint); added retention/timeout rationale and explicit out-of-scope items.

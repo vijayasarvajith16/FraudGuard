@@ -1,0 +1,122 @@
+# Rendered by the image entrypoint (envsubst, NGINX_* variables only) into
+# /etc/nginx/conf.d/default.conf. Route table: docs/contracts.md §8.
+# Scan services and /internal routes are never reachable through the gateway.
+
+server {
+    listen 8080;
+    # DNS for lazily resolved upstreams (the frontend), so the gateway starts without them.
+    resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+
+    # Gateway-generated errors use the contract's JSON envelope (§0.5).
+    error_page 413 @payload_too_large;
+    error_page 429 @rate_limited;
+    error_page 502 @bad_gateway;
+    error_page 503 @unavailable;
+    error_page 504 @upstream_timeout;
+
+    location = /health {
+        include /etc/nginx/snippets/headers.conf;
+        return 200 '{"status":"ok","service":"api-gateway"}';
+    }
+
+    # ---- deny list: regex locations are checked after prefix matching and win over it ----
+    # Service-internal paths at the root (including ones reached via ".." normalization).
+    location ~ ^/(internal|metrics)(/|$) {
+        include /etc/nginx/snippets/headers.conf;
+        return 404 '{"error":{"code":"NOT_FOUND","message":"No route for $request_method $uri","requestId":"$req_id"}}';
+    }
+    location ~ ^/api/.*/(internal|metrics|health)(/|$) {
+        include /etc/nginx/snippets/headers.conf;
+        return 404 '{"error":{"code":"NOT_FOUND","message":"No route for $request_method $uri","requestId":"$req_id"}}';
+    }
+
+    # ---- auth-service ----
+    location = /api/auth/login {
+        limit_req zone=login burst=5 nodelay;
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://auth_service/auth/login;
+    }
+    location /api/auth/ {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://auth_service/auth/;
+    }
+
+    # ---- transaction-service ----
+    location = /api/wallet {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://transaction_service/wallet;
+    }
+    location /api/wallet/ {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://transaction_service/wallet/;
+    }
+    location = /api/transactions {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://transaction_service/transactions;
+    }
+    location /api/transactions/ {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://transaction_service/transactions/;
+    }
+
+    # ---- alerting-service ----
+    location = /api/alerts {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://alerting_service/alerts;
+    }
+    location /api/alerts/ {
+        include /etc/nginx/snippets/proxy.conf;
+        proxy_pass http://alerting_service/alerts/;
+    }
+
+    # Any other API path.
+    location /api/ {
+        include /etc/nginx/snippets/headers.conf;
+        return 404 '{"error":{"code":"NOT_FOUND","message":"No route for $request_method $uri","requestId":"$req_id"}}';
+    }
+
+    # ---- frontend SPA (Phase 7); resolved per request so its absence does not stop the gateway ----
+    location / {
+        set $frontend_upstream http://frontend:8081;
+        proxy_set_header Host $host;
+        proxy_set_header X-Request-Id $req_id;
+        proxy_pass $frontend_upstream;
+        include /etc/nginx/snippets/headers.conf;
+    }
+
+    # ---- error envelopes ----
+    location @payload_too_large {
+        include /etc/nginx/snippets/headers.conf;
+        return 413 '{"error":{"code":"PAYLOAD_TOO_LARGE","message":"Request body too large","requestId":"$req_id"}}';
+    }
+    location @rate_limited {
+        include /etc/nginx/snippets/headers.conf;
+        add_header Retry-After 1 always;
+        return 429 '{"error":{"code":"RATE_LIMITED","message":"Too many requests","requestId":"$req_id"}}';
+    }
+    location @bad_gateway {
+        include /etc/nginx/snippets/headers.conf;
+        return 502 '{"error":{"code":"SERVICE_UNAVAILABLE","message":"Upstream service unavailable","requestId":"$req_id"}}';
+    }
+    location @unavailable {
+        include /etc/nginx/snippets/headers.conf;
+        return 503 '{"error":{"code":"SERVICE_UNAVAILABLE","message":"Service unavailable","requestId":"$req_id"}}';
+    }
+    location @upstream_timeout {
+        include /etc/nginx/snippets/headers.conf;
+        return 504 '{"error":{"code":"UPSTREAM_TIMEOUT","message":"Upstream service timed out","requestId":"$req_id"}}';
+    }
+}
+
+# Internal-only status page for the Prometheus exporter (never published by compose).
+server {
+    listen 8090;
+    location = /nginx_status {
+        stub_status;
+        allow 127.0.0.1;
+        allow 10.0.0.0/8;
+        allow 172.16.0.0/12;
+        allow 192.168.0.0/16;
+        deny all;
+    }
+}
