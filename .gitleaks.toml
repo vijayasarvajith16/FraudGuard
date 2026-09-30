@@ -1,0 +1,27 @@
+# gitleaks configuration: the default rule set plus narrow allowlists for known false positives.
+# Each allowlist names the exact pattern it tolerates, so a real secret in the same file is still found.
+# Run: make secrets-scan (full history); the pre-commit hook scans staged changes.
+
+title = "FraudGuard gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "generic-api-key spans an empty `KEY=` in a .env.example into the next `OTHER_KEY=value` line"
+regexTarget = "secret"
+regexes = ['''^[A-Z][A-Z0-9_]*=''']
+
+[[allowlists]]
+description = "Fixed JWT secret used only by the Node services' unit tests"
+regexTarget = "secret"
+regexes = ['''^test-jwt-secret-that-is-at-least-32-characters-long$''']
+
+[[allowlists]]
+description = "Idempotency-Key header values in tests are request IDs, not credentials"
+regexTarget = "line"
+regexes = ['''['"]Idempotency-Key['"]\s*:''']
+
+[[allowlists]]
+description = "Dependencies and build output are not ours to scan"
+paths = ['''(^|/)node_modules/''', '''(^|/)\.venv/''', '''(^|/)dist/''']

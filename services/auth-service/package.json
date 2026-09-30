@@ -15,6 +15,11 @@
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write ."
   },
+  "config": {
+    "mongodbMemoryServer": {
+      "downloadDir": "../../.cache/mongodb-binaries"
+    }
+  },
   "dependencies": {
     "@prometheus-io/client": "^0.16.1",
     "bcrypt": "^6.0.0",

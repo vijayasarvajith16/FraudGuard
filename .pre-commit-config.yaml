@@ -1,0 +1,88 @@
+# Git hooks: `make hooks` installs them; `.venv/bin/pre-commit run --all-files` (Scripts\ on Windows)
+# runs them on demand. Needs gitleaks on PATH (winget install Gitleaks.Gitleaks / brew install gitleaks).
+default_install_hook_types: [pre-commit]
+exclude: '(^|/)(node_modules|\.venv|dist|coverage)/|package-lock\.json$'
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        exclude: ^infra/helm/.*/templates/  # Helm templates are not plain YAML
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-case-conflict  # Windows/macOS checkouts break on names differing only by case
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      # Secrets in the staged diff (config: .gitleaks.toml); `make secrets-scan` covers the history.
+      # A local hook on the installed binary: upstream's builds gitleaks with Go, and its "system"
+      # variant passes file names, which `gitleaks git` rejects.
+      - id: gitleaks
+        name: gitleaks (staged changes)
+        language: system
+        entry: gitleaks git --pre-commit --staged --redact --no-banner
+        pass_filenames: false
+      - id: forbid-env-and-data
+        name: never commit .env files or datasets
+        language: fail
+        entry: ".env files and datasets must not be committed (keep secrets in .env, data in ml/data/, both gitignored)"
+        files: '(^|/)\.env$|(^|/)\.env\.(?!example$)[^/]+$|^ml/data/(?!\.gitkeep$)|\.csv$'
+
+  # Python: each project's pyproject.toml (or the root ruff.toml) supplies the rules.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.9
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # JavaScript/CSS/Markdown formatting, honouring each package's .prettierrc. Uses the Prettier the
+  # packages already pin (same version everywhere) rather than a hook-managed Node, which pre-commit
+  # cannot provide from the system Node on Windows.
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier (write)
+        language: system
+        entry: node frontend/node_modules/prettier/bin/prettier.cjs --write --ignore-unknown
+        files: ^(frontend|services/(auth|transaction|alerting)-service)/
+        types_or: [javascript, jsx, json, css, markdown, html]
+        exclude: ^frontend/src/demo/sampleFeatures\.json$
+
+  # ESLint (plus prettier --check) per Node package, using its own installed toolchain (make install).
+  - repo: local
+    hooks:
+      - id: lint-auth-service
+        name: lint auth-service
+        language: system
+        entry: npm --prefix services/auth-service run --silent lint
+        files: ^services/auth-service/
+        pass_filenames: false
+      - id: lint-transaction-service
+        name: lint transaction-service
+        language: system
+        entry: npm --prefix services/transaction-service run --silent lint
+        files: ^services/transaction-service/
+        pass_filenames: false
+      - id: lint-alerting-service
+        name: lint alerting-service
+        language: system
+        entry: npm --prefix services/alerting-service run --silent lint
+        files: ^services/alerting-service/
+        pass_filenames: false
+      - id: lint-frontend
+        name: lint frontend
+        language: system
+        entry: npm --prefix frontend run --silent lint
+        files: ^frontend/
+        pass_filenames: false

@@ -77,3 +77,6 @@ desktop.ini
 
 # ---- Claude Code local settings ----
 .claude/settings.local.json
+
+# Shared mongodb-memory-server binary for the Node services (one download per clone)
+/.cache/

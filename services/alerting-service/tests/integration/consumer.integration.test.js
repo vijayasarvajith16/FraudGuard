@@ -11,7 +11,10 @@ const { scoredEvent } = require('../helpers');
 
 const BASE_URL = process.env.RABBITMQ_TEST_URL;
 const MGMT_URL = process.env.RABBITMQ_TEST_MGMT_URL;
-const describeIfBroker = BASE_URL && MGMT_URL ? describe : describe.skip;
+// Run by `npm run test:integration` (make test-integration) only; `npm test` excludes this folder.
+if (!BASE_URL || !MGMT_URL) {
+  throw new Error('Set RABBITMQ_TEST_URL and RABBITMQ_TEST_MGMT_URL (make test-integration does this from .env)');
+}
 
 const waitFor = async (predicate, timeoutMs = 10_000) => {
   const deadline = Date.now() + timeoutMs;
@@ -23,7 +26,7 @@ const waitFor = async (predicate, timeoutMs = 10_000) => {
   return null;
 };
 
-describeIfBroker('ScoredConsumer against a real broker', () => {
+describe('ScoredConsumer against a real broker', () => {
   const vhost = `fraudguard-test-${randomUUID().slice(0, 8)}`;
   const { username, password } = new URL(BASE_URL);
   const user = decodeURIComponent(username);

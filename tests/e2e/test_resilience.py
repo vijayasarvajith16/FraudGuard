@@ -1,0 +1,112 @@
+"""Failure behaviour (docs/contracts.md §9): every uncertainty resolves toward review, never approval.
+
+These tests stop, pause and restart real containers, and always restore them. They run last
+(file order) and can be skipped with `-m "not disruptive"`.
+"""
+
+import os
+import shlex
+import subprocess
+import time
+
+import pytest
+from conftest import REPO_ROOT, money
+
+pytestmark = pytest.mark.disruptive
+COMPOSE = shlex.split(os.environ.get("E2E_COMPOSE", "docker compose"))
+
+
+def compose(*args, check=True):
+    return subprocess.run([*COMPOSE, *args], cwd=REPO_ROOT, check=check, capture_output=True, text=True, timeout=240)
+
+
+def restore(service, timeout=180):
+    """Unpause/start the service and wait until its healthcheck passes again.
+
+    Not `up --wait`: a container that was paused is still marked unhealthy (its checks timed out)
+    until the next check succeeds, and --wait fails on that stale state instead of waiting.
+    """
+    compose("unpause", service, check=False)  # no-op unless paused
+    compose("up", "-d", "--no-deps", service)
+    container = compose("ps", "-q", service).stdout.strip()
+    deadline = time.monotonic() + timeout
+    while True:
+        health = subprocess.run(
+            ["docker", "inspect", "-f", "{{.State.Health.Status}}", container], capture_output=True, text=True
+        ).stdout.strip()
+        if health == "healthy":
+            return
+        if time.monotonic() > deadline:
+            pytest.fail(f"{service} not healthy {timeout}s after restore (last: {health})")
+        time.sleep(1)
+
+
+@pytest.fixture
+def quick_scan():
+    yield "quick-scan-service"
+    restore("quick-scan-service")
+
+
+@pytest.fixture
+def deep_scan():
+    yield "deep-scan-service"
+    restore("deep-scan-service")
+
+
+def test_quick_scan_timeout_sends_the_transfer_to_review_not_approval(new_user, bob, quick_scan, policy):
+    alice = new_user("qs-timeout", deposit=100)
+    compose("pause", quick_scan)  # accepts connections but never answers: the 300 ms timeout path
+
+    started = time.monotonic()
+    res = alice.transfer(bob, 10)
+    elapsed = time.monotonic() - started
+
+    assert res.status == 201, res
+    tx = res.body["transaction"]
+    assert tx["status"] == "UNDER_REVIEW"
+    assert tx["quickScan"]["reason"] == "QUICK_SCAN_UNAVAILABLE"
+    assert elapsed < 3, f"the hot path must not wait on a hung quick-scan ({elapsed:.1f}s)"
+    assert alice.wallet()["held"] == 10
+
+    # Deep-scan still scores it; the neutral vector is LOW, so it is approved *after* a real score.
+    final = alice.wait_until_rest(tx["id"])
+    assert final["deepScan"] is not None
+    assert final["status"] == policy[final["riskTier"]]["resultingStatus"]
+    assert [h["status"] for h in final["statusHistory"]][:2] == ["PENDING", "UNDER_REVIEW"]
+
+
+def test_quick_scan_down_sends_the_transfer_to_review_and_recovers(new_user, bob, quick_scan, samples):
+    alice = new_user("qs-down", deposit=100)
+    compose("stop", quick_scan)  # connection refused: the error path
+
+    res = alice.transfer(bob, 10)
+
+    assert res.status == 201, res
+    assert res.body["transaction"]["status"] == "UNDER_REVIEW"
+    assert res.body["transaction"]["quickScan"]["reason"] == "QUICK_SCAN_UNAVAILABLE"
+
+    restore(quick_scan)  # reloads the production model from the registry (~20 s)
+    row = samples["categories"]["normal"][0]
+    after = alice.transfer(bob, money(row["Amount"]), row)
+    assert after.body["transaction"]["status"] == "APPROVED"
+    assert after.body["transaction"]["quickScan"]["reason"] == "NORMAL"
+
+
+def test_deep_scan_down_keeps_flagged_transfers_held_until_it_returns(new_user, bob, deep_scan, samples):
+    alice = new_user("ds-down", deposit=1000)
+    row = samples["categories"]["fraud"][0]
+    compose("stop", deep_scan)
+
+    res = alice.transfer(bob, money(row["Amount"]), row)
+    assert res.status == 201, res
+    tx_id = res.body["transaction"]["id"]
+    time.sleep(6)  # longer than a retry cycle: nothing may resolve it while deep-scan is away
+    waiting = alice.get(f"/api/transactions/{tx_id}").body["transaction"]
+    assert waiting["status"] == "UNDER_REVIEW"
+    assert waiting["deepScan"] is None
+    assert alice.wallet()["held"] == money(row["Amount"])
+
+    restore(deep_scan)  # the message waited durably in transactions.flagged
+    final = alice.wait_until_rest(tx_id, timeout=60)
+    assert final["deepScan"] is not None
+    assert final["riskTier"] in {"MEDIUM", "HIGH", "CRITICAL"}

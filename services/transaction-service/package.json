@@ -10,11 +10,16 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "jest",
-    "test:coverage": "jest --coverage",
+    "test": "jest --testPathIgnorePatterns /integration/",
+    "test:coverage": "jest --coverage --testPathIgnorePatterns /integration/",
     "test:integration": "jest --testPathPatterns integration",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write ."
+  },
+  "config": {
+    "mongodbMemoryServer": {
+      "downloadDir": "../../.cache/mongodb-binaries"
+    }
   },
   "dependencies": {
     "@prometheus-io/client": "^0.16.1",

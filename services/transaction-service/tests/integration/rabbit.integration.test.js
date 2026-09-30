@@ -2,7 +2,6 @@
 
 // Runs against a real RabbitMQ (the compose broker) in a throwaway vhost:
 //   RABBITMQ_TEST_URL=amqp://user:pass@127.0.0.1:5673  RABBITMQ_TEST_MGMT_URL=http://127.0.0.1:15673
-// Skipped when RABBITMQ_TEST_URL is not set.
 
 const { randomUUID } = require('node:crypto');
 const amqplib = require('amqplib');
@@ -12,9 +11,12 @@ const { createLogger } = require('../../src/logger');
 
 const BASE_URL = process.env.RABBITMQ_TEST_URL;
 const MGMT_URL = process.env.RABBITMQ_TEST_MGMT_URL;
-const describeIfBroker = BASE_URL && MGMT_URL ? describe : describe.skip;
+// Run by `npm run test:integration` (make test-integration) only; `npm test` excludes this folder.
+if (!BASE_URL || !MGMT_URL) {
+  throw new Error('Set RABBITMQ_TEST_URL and RABBITMQ_TEST_MGMT_URL (make test-integration does this from .env)');
+}
 
-describeIfBroker('RabbitPublisher against a real broker', () => {
+describe('RabbitPublisher against a real broker', () => {
   const vhost = `fraudguard-test-${randomUUID().slice(0, 8)}`;
   const { username, password } = new URL(BASE_URL);
   const mgmtAuth = {
