@@ -4,6 +4,8 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
+NODE_SERVICES := auth-service
+
 .PHONY: help up down ps logs test lint
 
 help: ## List available targets
@@ -21,8 +23,8 @@ ps: ## Show container status
 logs: ## Tail logs from all containers
 	$(COMPOSE) logs -f --tail=100
 
-test: ## Run unit tests for every service (stub until Phase 2+)
-	@echo "No service tests yet; each service phase adds its test command here."
+test: ## Run unit tests for every service
+	@set -e; for svc in $(NODE_SERVICES); do echo "==> test $$svc"; npm --prefix services/$$svc test; done
 
-lint: ## Lint every service (stub until Phase 2+)
-	@echo "No linters yet; each service phase adds its lint command here."
+lint: ## Lint every service
+	@set -e; for svc in $(NODE_SERVICES); do echo "==> lint $$svc"; npm --prefix services/$$svc run lint; done

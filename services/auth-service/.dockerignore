@@ -1,0 +1,14 @@
+node_modules
+coverage
+tests
+.env
+.env.*
+!.env.example
+*.md
+.eslintcache
+eslint.config.js
+jest.config.js
+.prettierrc.json
+.prettierignore
+Dockerfile
+.dockerignore

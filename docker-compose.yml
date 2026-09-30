@@ -18,10 +18,13 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-fraudguard}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-fraudguard-dev}
+      # Per-service users, created by infra/mongo/init on first volume initialization.
+      MONGO_AUTH_PASSWORD: ${MONGO_AUTH_PASSWORD:?set MONGO_AUTH_PASSWORD in .env}
     ports:
       - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
     volumes:
       - mongo-data:/data/db
+      - ./infra/mongo/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
       interval: 10s
@@ -57,6 +60,36 @@ services:
       resources:
         limits:
           memory: 512m
+    restart: unless-stopped
+    logging: *default-logging
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+    image: fraudguard/auth-service:dev
+    container_name: fraudguard-auth-service
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TRUST_PROXY: 1
+      MONGO_URI: mongodb://auth_service:${MONGO_AUTH_PASSWORD}@mongodb:27017/fraudguard_auth?authSource=fraudguard_auth
+      MONGO_DB: fraudguard_auth
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      # Demo stack: longer tokens so a demo is not interrupted (docs/contracts.md §0.4).
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-2h}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?set INTERNAL_SERVICE_TOKEN in .env}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    ports:
+      - "127.0.0.1:${AUTH_HOST_PORT:-3001}:3001"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
     restart: unless-stopped
     logging: *default-logging
 
