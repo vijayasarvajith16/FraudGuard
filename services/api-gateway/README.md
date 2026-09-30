@@ -8,7 +8,7 @@ Nginx (official unprivileged image, stable 1.30) as the single public entry poin
 | `/api/auth/*`                                                                                       | auth-service `/auth/*` (`POST /api/auth/login`: 10 req/min per IP, burst 5)   |
 | `/api/wallet*`, `/api/transactions*`                                                                | transaction-service                                                           |
 | `/api/alerts*`                                                                                      | alerting-service                                                              |
-| `/`                                                                                                 | frontend SPA (Phase 7), resolved per request so the gateway starts without it |
+| `/`                                                                                                 | frontend SPA (`frontend:8081`, §8.1), resolved per request so the gateway starts without it; its duplicate security headers are hidden |
 | `/internal*`, `/metrics`, `/api/**/internal`, `/api/**/metrics`, `/api/**/health`, unknown `/api/*` | `404`                                                                         |
 
 The scan services have **no route at all**.

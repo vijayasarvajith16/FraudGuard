@@ -1,6 +1,6 @@
 # FraudGuard Service Contracts
 
-**Status:** authoritative. Contract version `1.4.0`.
+**Status:** authoritative. Contract version `1.5.0`.
 Change this file first, then the code. Any change that breaks a consumer bumps the major version and the message `version` field.
 
 This document defines every HTTP API, the transaction data model, the RabbitMQ topology, the risk policy, and failure behaviour. If code and this file disagree, the code is wrong.
@@ -19,7 +19,7 @@ This document defines every HTTP API, the transaction data model, the RabbitMQ t
 | alerting-service | `alerting-service` | 3003 | `/api/alerts/*` |
 | quick-scan-service | `quick-scan-service` | 8001 | **never** |
 | deep-scan-service | `deep-scan-service` | 8002 | **never** |
-| frontend | `frontend` | 8081 | `/` |
+| frontend (Nginx serving the SPA) | `frontend` | 8081 | `/` (§8.1) |
 | MongoDB | `mongodb` | 27017 | never |
 | RabbitMQ | `rabbitmq` | 5672 (AMQP), 15672 (management UI) | never |
 
@@ -102,7 +102,19 @@ The anonymized Kaggle Credit Card Fraud features. The same object is used by the
 - If a client omits `features` entirely, transaction-service builds a neutral vector: `V1..V28 = 0` (the PCA mean), `Time` = seconds since UTC midnight, `Amount` = amount. This is a demo simplification because the real features are anonymized.
 - **Consequence:** a transfer without features is almost always scored normal and approved immediately. Flagged flows are demonstrated with real feature rows, supplied either by:
   1. the frontend transfer form's **Risk profile** selector (`Default`, `Normal sample`, `Suspicious sample`, `Known fraud sample`). The samples are real rows from the dataset, bundled in `frontend/src/demo/sampleFeatures.json`, which `tools/make_demo_samples.py` generates (a few dozen rows, no labels beyond the category). The form tells the user that `Default` will normally be approved; or
-  2. `tools/replay.py`, which streams dataset rows through the gateway.
+  2. `tools/replay.py`, which streams dataset rows through the gateway (§8.2).
+
+  Sample categories are assigned by scoring candidate rows, at their original `Amount`, with the production models at generation time (the file records both model versions):
+
+  | Category | Rule | Expected outcome |
+  |---|---|---|
+  | `normal` | label 0, quick-scan not flagged | `APPROVED` / `LOW` immediately |
+  | `suspicious` | quick-scan flagged, deep-scan tier `MEDIUM` or `HIGH` (either label) | notification or OTP step-up |
+  | `fraud` | label 1, quick-scan flagged, deep-scan tier `CRITICAL` | account frozen, manual review |
+
+  Rows with `Amount = 0` are skipped (a transfer must be `> 0`). Because `Amount` is part of the vector and the server overwrites it with the transfer amount, choosing a sample pre-fills the transfer amount with the sample's `Amount`; the form warns that changing it can change the outcome. The expected outcome holds only for the recorded model versions.
+
+  File shape: `{ "generatedAt", "source": "creditcard.csv", "models": { "quickScan": "2", "deepScan": "2" }, "categories": { "normal": [features...], "suspicious": [...], "fraud": [...] } }`.
 
   Either way, features always reach the server through `POST /api/transactions`. No client talks to a scan service directly.
 
@@ -534,7 +546,8 @@ Metrics: `alerts_created_total{tier,action}`, `otp_verifications_total{result="s
 | anything matching `/internal`, `/metrics`, `/health/live` under `/api/*`, or not listed | `404` | Explicit deny. Scan services are unreachable. |
 
 - General rate limit: 20 req/s per IP, burst 40 → `429` with the §0.5 envelope.
-- The frontend talks **only** to `/api/*` on the gateway. It tracks the outcome of a flagged transfer by polling `GET /api/transactions/{id}` (every 2 s, backing off to 10 s, stopping at a terminal status or `AWAITING_OTP`). It never calls a scan service, RabbitMQ or an `/internal` route, and the gateway has no route to them.
+- The frontend talks **only** to `/api/*` on the gateway. It tracks the outcome of a flagged transfer by polling `GET /api/transactions/{id}` (every 2 s, backing off to 10 s, stopping at a **resting** status: `APPROVED` or `BLOCKED` (terminal), or `AWAITING_OTP` / `ACCOUNT_FROZEN`, which wait on the user or an admin rather than the pipeline). It never calls a scan service, RabbitMQ or an `/internal` route, and the gateway has no route to them.
+- On `/`, the gateway hides the frontend's own `X-Frame-Options`, `X-Content-Type-Options` and `Referrer-Policy` so each header is sent exactly once; the frontend's `Content-Security-Policy` passes through.
 - CORS: allow the origins in `CORS_ALLOWED_ORIGINS`; methods `GET, POST, PATCH, OPTIONS`; headers `Authorization, Content-Type, Idempotency-Key, X-Request-Id`; expose `X-Request-Id, Idempotent-Replayed`.
 - `X-Request-Id`: `$http_x_request_id` if present, otherwise `$request_id`; forwarded upstream and returned to the client.
 - Upstream timeouts: connect 2 s, read 10 s. Max body 100 kB.
@@ -542,6 +555,32 @@ Metrics: `alerts_created_total{tier,action}`, `otp_verifications_total{result="s
 - Errors produced by the gateway itself (`404` unknown route, `413`, `429`, `502`/`503`/`504` upstream failures) use the §0.5 envelope, with `requestId`.
 - Runs as a non-root user on port **8080**. `stub_status` is served only on the internal port **8090** (`/nginx_status`) for the Prometheus exporter; it is not published.
 - Security headers on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`. `server_tokens off`.
+
+### 8.1 Frontend (SPA)
+
+React single-page app, built by Vite and served by a non-root Nginx on port **8081** (`frontend:8081`). In compose it is reached only through the gateway's `/`; in Kubernetes the ingress routes `/` to it and `/api` to the gateway.
+
+| Route | Access | Content |
+|---|---|---|
+| `/login`, `/register` | public | Registration signs the user straight in. |
+| `/` | user | Wallet (available, held, frozen banner), deposit, transfer form with the Risk profile selector (§0.8), live tracker of the last transfer, recent activity. |
+| `/transactions` | user | History with status and tier badges, status filter, cursor pagination, per-transaction details (quick-scan, deep-scan, status history). |
+| `/alerts` | user | Alerts; OTP entry for `OTP_STEP_UP` alerts whose transaction is still `AWAITING_OTP` (shows `simulatedOtp` when the server exposes it). |
+| `/admin` | `admin` role | Manual review queue (`OPEN`/`RESOLVED`) with approve/reject and a note, account unfreeze for rejected cases, the active tier policy and a reload button. |
+
+- **API base:** `VITE_API_BASE_URL` (build time, default `/api`, same origin through the gateway). The Vite dev server proxies `/api` to the gateway, so development needs no CORS; `CORS_ALLOWED_ORIGINS` still lists `http://localhost:5173` for a dev build pointed at the gateway directly.
+- **Token handling:** the access token is kept in `sessionStorage` (cleared when the tab closes) and attached as `Authorization: Bearer`. The client signs the user out when the token's `exp` passes or any authenticated call returns `401`, since there is no refresh token (§0.4). Role checks in the UI are cosmetic; the services enforce them.
+- **Idempotency:** each transfer attempt gets one `Idempotency-Key` (UUID v4). A retry after a network error or `5xx` reuses the key, so a double submit cannot create two transfers; the key is replaced once the server gives a definite answer.
+- **Errors:** §0.5 envelopes are shown with their message, per-field `details`, and the `requestId` for support.
+- **Headers:** a strict `Content-Security-Policy` (`default-src 'self'`; `connect-src` from `NGINX_CSP_CONNECT_SRC`, default `'self'`; `frame-ancestors 'none'`) plus the §8 security headers. Hashed assets under `/assets/` are cached for a year; `index.html` is `no-cache`; unknown paths fall back to `index.html`.
+- **Health:** `GET /health` → `200 {"status":"ok","service":"frontend"}`. The frontend is static, so it has no `/metrics`; its traffic is measured at the gateway.
+
+### 8.2 Demo tooling (`tools/`)
+
+Both tools use only the Python standard library.
+
+- **`tools/replay.py <creditcard.csv>`** replays dataset rows as transfers through the gateway: `--rate` transfers per second (at most 15, under the gateway limit), `--count`, `--fraud-ratio` (fraction of rows drawn from label-1 rows; by default the dataset's natural rate), `--users`, `--seed`. It registers and funds demo users, and each transfer sends a row's feature vector between two of them. The transfer **amount is the row's `Amount`**, so the scored vector is exactly the dataset row; rows with `Amount = 0` are skipped. Every transfer gets a fresh `Idempotency-Key`, reused when retrying after a `429`, `5xx` or network error. A sender whose account becomes frozen is retired, and a new demo user replaces it when none is left. At the end it waits (`--wait` seconds) for flagged transfers to rest, then logs per-tier outcome counts split by row label. The label never leaves the tool.
+- **`tools/make_demo_samples.py <creditcard.csv>`** regenerates `frontend/src/demo/sampleFeatures.json` (§0.8). It is offline developer tooling and calls the scan services' `/score` directly on their compose host ports (`127.0.0.1:8001` and `:8002`); no client does this.
 
 ---
 
@@ -589,8 +628,10 @@ Every service reads configuration only from the environment and ships a `.env.ex
 | deep-scan | the MLflow variables above, `MODEL_URI=models:/fraudguard-deep-scan@production`, `ALLOW_LOCAL_MODEL_FALLBACK=false`, `LOCAL_MODEL_PATH`, `RABBITMQ_URL`, `TIER_MEDIUM_MIN=0.30`, `TIER_HIGH_MIN=0.70`, `TIER_CRITICAL_MIN=0.90`, `MAX_RETRIES=3`, `PREFETCH=10` |
 | alerting | `MONGO_URI`, `MONGO_DB=fraudguard_alerts`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `TRANSACTION_SERVICE_URL`, `TIER_ACTIONS_PATH`, `TIER_ACTIONS_POLL_SECONDS=30`, `OTP_TTL_SECONDS=300`, `OTP_MAX_ATTEMPTS=3`, `EXPOSE_SIMULATED_OTP=false`, `MAX_RETRIES=3`, `PREFETCH=10`, `OTP_SECRET` (≥ 32 chars), `OTP_SWEEP_INTERVAL_SECONDS=60`, `TRANSACTION_SERVICE_TIMEOUT_MS=3000` |
 | gateway | `CORS_ALLOWED_ORIGINS` (space-separated exact origins), `NGINX_RESOLVER` (DNS for lazily-resolved upstreams; `127.0.0.11` in Docker) |
+| frontend | `VITE_API_BASE_URL=/api` (build time), `NGINX_CSP_CONNECT_SRC='self'` (runtime) |
 
 ## 11. Changelog
+- **1.5.0** (2026-09-30): no breaking changes. Frontend (§8.1): routes, token handling, idempotent transfer retries, headers, health; the polling stop rule names the resting statuses (`ACCOUNT_FROZEN` included); demo sample categories and file shape (§0.8); replay and sample tools (§8.2); the gateway hides duplicate security headers from the frontend.
 - **1.4.0** (2026-09-30): no breaking changes. tierActions.json format and consistency rules; OTP hashing (`OTP_SECRET`) and sweeper behaviour; LOG alerts are audit-only; the alerting consumer's handling of transaction-service responses; gateway error envelopes, ports, security headers and env vars.
 - **1.3.0** (2026-09-30): no breaking changes. MongoDB runs as a single-node replica set, and money movements are multi-document transactions; recovery of interrupted `PENDING` transfers; every service declares the full topology of the events it touches, with mandatory publishes; transaction-service readiness no longer depends on RabbitMQ (the outbox covers outages); clarified that redelivered scored events share `eventId`/score but not timestamps.
 - **1.2.0** (2026-09-30): no breaking changes. Added §4.1 model loading (pinned version download, native loading with a service-owned skops allowlist, required metadata, XGBoost best-iteration scoring) and changed model-load failure to fail-fast.

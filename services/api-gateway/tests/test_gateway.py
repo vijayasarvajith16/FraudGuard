@@ -124,6 +124,45 @@ def test_unknown_api_route_uses_envelope():
     assert_envelope(body, "NOT_FOUND")
 
 
+# ---- frontend (§8, §8.1) --------------------------------------------------------------------
+
+
+def get_raw(path):
+    with urllib.request.urlopen(f"{GATEWAY}{path}", timeout=10) as res:
+        return res.status, res.headers, res.read().decode()
+
+
+@pytest.mark.parametrize("path", ["/", "/transactions", "/alerts", "/admin"])
+def test_spa_routes_serve_index_html_through_the_gateway(path):
+    status, headers, body = get_raw(path)
+    assert status == 200
+    assert headers["Content-Type"].startswith("text/html")
+    assert '<div id="root">' in body
+    assert headers["Cache-Control"] == "no-cache"
+
+
+def test_frontend_security_headers_are_sent_exactly_once():
+    _, headers, _ = get_raw("/")
+    for name in ("X-Frame-Options", "X-Content-Type-Options", "Referrer-Policy", "Content-Security-Policy"):
+        assert len(headers.get_all(name) or []) == 1, name
+    csp = headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert "connect-src 'self'" in csp
+
+
+def test_hashed_assets_are_immutable_and_missing_ones_are_not_cached():
+    _, _, index = get_raw("/")
+    script = index.split('src="', 1)[1].split('"', 1)[0]
+    assert script.startswith("/assets/")
+    _, headers, _ = get_raw(script)
+    assert headers["Cache-Control"] == "public, max-age=31536000, immutable"
+    with pytest.raises(urllib.error.HTTPError) as err:
+        get_raw("/assets/does-not-exist.js")
+    assert err.value.code == 404
+    assert "immutable" not in (err.value.headers.get("Cache-Control") or "")
+
+
 # ---- CORS -----------------------------------------------------------------------------------
 
 

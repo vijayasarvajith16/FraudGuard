@@ -201,7 +201,7 @@ services:
     container_name: fraudguard-api-gateway
     environment:
       NGINX_RESOLVER: 127.0.0.11
-      # The gateway itself (SPA served through it) and the Vite dev server (Phase 7).
+      # The gateway itself (SPA served through it) and the Vite dev server.
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8080 http://localhost:5173}
     ports:
       - "127.0.0.1:${GATEWAY_HOST_PORT:-8080}:8080"
@@ -216,6 +216,24 @@ services:
       resources:
         limits:
           memory: 64m
+    restart: unless-stopped
+    logging: *default-logging
+
+  # React SPA served by a non-root Nginx (docs/contracts.md §8.1). No host port: it is reached
+  # only through the gateway's "/", which resolves it lazily, so the gateway does not wait on it.
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: /api
+    image: fraudguard/frontend:dev
+    container_name: fraudguard-frontend
+    environment:
+      NGINX_CSP_CONNECT_SRC: "'self'"
+    deploy:
+      resources:
+        limits:
+          memory: 32m
     restart: unless-stopped
     logging: *default-logging
 
