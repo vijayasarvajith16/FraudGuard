@@ -1,1 +1,26 @@
-{}
+{
+  "version": 1,
+  "tiers": {
+    "LOW": {
+      "action": "LOG",
+      "resultingStatus": "APPROVED",
+      "notifyUser": false
+    },
+    "MEDIUM": {
+      "action": "NOTIFY",
+      "resultingStatus": "APPROVED",
+      "notifyUser": true
+    },
+    "HIGH": {
+      "action": "OTP_STEP_UP",
+      "resultingStatus": "AWAITING_OTP",
+      "notifyUser": true
+    },
+    "CRITICAL": {
+      "action": "BLOCK_AND_FREEZE",
+      "resultingStatus": "ACCOUNT_FROZEN",
+      "notifyUser": true,
+      "openReviewCase": true
+    }
+  }
+}
