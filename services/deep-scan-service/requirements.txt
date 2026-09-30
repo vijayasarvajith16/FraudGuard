@@ -13,3 +13,4 @@ httptools==0.8.0
 uvloop==0.22.1; sys_platform != "win32"
 prometheus-client==0.26.0
 pyyaml==6.0.3
+aio-pika==10.1.0

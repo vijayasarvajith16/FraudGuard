@@ -17,6 +17,7 @@ from . import __version__
 from .config import DEFAULT_MODEL_NAME, Settings, load_settings
 from .metrics import Metrics
 from .model_loader import ModelLoadError, fetch_model
+from .queue.consumer import FlaggedConsumer
 from .schemas import DeepScoreResponse, ErrorResponse, ScoreRequest
 from .scorer import DeepScanScorer
 
@@ -51,6 +52,7 @@ def create_app(settings: Settings | None = None, scorer: DeepScanScorer | None =
                 log.critical("model load failed; refusing to start", extra={"error": str(exc)})
                 raise
         app.state.scorer = active
+        app.state.consumer = None
         metrics.set_model(active.artifact.describe())
         log.info(
             "model loaded",
@@ -60,7 +62,21 @@ def create_app(settings: Settings | None = None, scorer: DeepScanScorer | None =
                 "iterations": active.iteration_range[1],
             },
         )
-        yield
+        if settings.consumer_enabled:
+            consumer = FlaggedConsumer(
+                settings.rabbitmq_url,
+                active,
+                metrics,
+                prefetch=settings.prefetch,
+                max_retries=settings.max_retries,
+            )
+            await consumer.start()
+            app.state.consumer = consumer
+        try:
+            yield
+        finally:
+            if app.state.consumer is not None:
+                await app.state.consumer.stop()
 
     app = FastAPI(
         title="FraudGuard deep-scan",
@@ -146,16 +162,22 @@ def create_app(settings: Settings | None = None, scorer: DeepScanScorer | None =
     @app.get("/health")
     def health(request: Request):
         active: DeepScanScorer | None = getattr(request.app.state, "scorer", None)
+        checks = {"model": "ok" if active else "fail"}
+        # Contract §5: readiness requires the model and, when consuming, a RabbitMQ connection.
+        if settings.consumer_enabled:
+            consumer = getattr(request.app.state, "consumer", None)
+            checks["rabbitmq"] = "ok" if consumer is not None and consumer.is_connected() else "fail"
+        healthy = all(v == "ok" for v in checks.values())
         body = {
-            "status": "ok" if active else "degraded",
+            "status": "ok" if healthy else "degraded",
             "service": settings.service_name,
             "version": __version__,
             "uptimeSeconds": round(time.monotonic() - started_at),
-            "checks": {"model": "ok" if active else "fail"},
+            "checks": checks,
         }
         if active:
             body["model"] = active.artifact.describe()
-        return JSONResponse(body, status_code=200 if active else 503)
+        return JSONResponse(body, status_code=200 if healthy else 503)
 
     @app.get("/metrics")
     def prometheus_metrics():

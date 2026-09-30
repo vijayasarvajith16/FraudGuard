@@ -27,6 +27,11 @@ class _Env(BaseModel):
     TIER_MEDIUM_MIN: Probability = 0.30
     TIER_HIGH_MIN: Probability = 0.70
     TIER_CRITICAL_MIN: Probability = 0.90
+    # RabbitMQ consumer (docs/contracts.md §3.5). Disable only for tests or HTTP-only debugging.
+    CONSUMER_ENABLED: bool = True
+    RABBITMQ_URL: str | None = None
+    MAX_RETRIES: Annotated[int, Field(ge=0, le=20)] = 3
+    PREFETCH: Annotated[int, Field(ge=1, le=500)] = 10
 
     @field_validator("LOG_LEVEL")
     @classmethod
@@ -43,7 +48,7 @@ class _Env(BaseModel):
             raise ValueError("must be a registry URI like models:/<name>@<alias> or models:/<name>/<version>")
         return v
 
-    @field_validator("MLFLOW_TRACKING_URI", "LOCAL_MODEL_PATH", mode="before")
+    @field_validator("MLFLOW_TRACKING_URI", "LOCAL_MODEL_PATH", "RABBITMQ_URL", mode="before")
     @classmethod
     def _empty_is_none(cls, v):
         return None if v == "" else v
@@ -78,6 +83,10 @@ class Settings:
     allow_local_fallback: bool
     local_model_path: str | None
     tiers: TierThresholds
+    consumer_enabled: bool = True
+    rabbitmq_url: str | None = None
+    max_retries: int = 3
+    prefetch: int = 10
     service_name: str = SERVICE_NAME
 
 
@@ -96,6 +105,10 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
             "tier thresholds must satisfy TIER_MEDIUM_MIN < TIER_HIGH_MIN < TIER_CRITICAL_MIN, got "
             f"{e.TIER_MEDIUM_MIN} / {e.TIER_HIGH_MIN} / {e.TIER_CRITICAL_MIN}"
         )
+    if e.CONSUMER_ENABLED and not e.RABBITMQ_URL:
+        problems.append("RABBITMQ_URL is required when CONSUMER_ENABLED=true")
+    if e.RABBITMQ_URL and not e.RABBITMQ_URL.startswith(("amqp://", "amqps://")):
+        problems.append("RABBITMQ_URL must be an amqp(s):// URL")
     if problems:
         raise RuntimeError("Invalid configuration:\n" + "\n".join(f"  - {p}" for p in problems))
     return Settings(
@@ -106,4 +119,8 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
         allow_local_fallback=e.ALLOW_LOCAL_MODEL_FALLBACK,
         local_model_path=e.LOCAL_MODEL_PATH,
         tiers=TierThresholds(e.TIER_MEDIUM_MIN, e.TIER_HIGH_MIN, e.TIER_CRITICAL_MIN),
+        consumer_enabled=e.CONSUMER_ENABLED,
+        rabbitmq_url=e.RABBITMQ_URL,
+        max_retries=e.MAX_RETRIES,
+        prefetch=e.PREFETCH,
     )

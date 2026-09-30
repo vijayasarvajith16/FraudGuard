@@ -1,6 +1,6 @@
 # FraudGuard Service Contracts
 
-**Status:** authoritative. Contract version `1.2.0`.
+**Status:** authoritative. Contract version `1.3.0`.
 Change this file first, then the code. Any change that breaks a consumer bumps the major version and the message `version` field.
 
 This document defines every HTTP API, the transaction data model, the RabbitMQ topology, the risk policy, and failure behaviour. If code and this file disagree, the code is wrong.
@@ -23,7 +23,7 @@ This document defines every HTTP API, the transaction data model, the RabbitMQ t
 | MongoDB | `mongodb` | 27017 | never |
 | RabbitMQ | `rabbitmq` | 5672 (AMQP), 15672 (management UI) | never |
 
-Each service owns its own database in the shared MongoDB instance and never reads another service's database:
+MongoDB runs as a **single-node replica set** (`rs0`) so that services can use multi-document ACID transactions; a standalone server cannot. Each service owns its own database in the shared MongoDB instance and never reads another service's database:
 `fraudguard_auth` (auth), `fraudguard_transactions` (transaction), `fraudguard_alerts` (alerting). The scan services are stateless.
 
 ### 0.2 Identifiers, money and time
@@ -157,7 +157,12 @@ Database `fraudguard_transactions`, collections `wallets`, `transactions`, `idem
 ```
 - A wallet is created lazily (balance 0) on first access.
 - `balance` is available funds; `held` is money reserved by transfers still under review.
-- All balance changes are single-document atomic updates with guards (for example `balanceCents >= amount`). Settlement across two wallets is driven by the transaction state machine (§2.4), and every step is idempotent.
+- Every money movement runs in **one MongoDB multi-document transaction** together with the transaction-status change that causes it, so money and status can never disagree:
+  - *create*: insert the idempotency record + move `amount` from `balance` to `held` (guard `balanceCents >= amount`, wallet not frozen) + insert the `PENDING` transaction.
+  - *settle* (→ `APPROVED`): sender `held -= amount` (guard `heldCents >= amount`) + recipient `balance += amount` + status change.
+  - *release* (→ `BLOCKED`): sender `held -= amount`, `balance += amount` + status change.
+  - *freeze* (→ `ACCOUNT_FROZEN`): sender wallet `frozen = true` + status change.
+- Status changes are conditional on the expected current status (optimistic concurrency), so a transition applies at most once even under concurrent or duplicate requests.
 
 API representation: `{ "userId", "balance": 100.00, "held": 25.00, "currency": "USD", "frozen": false, "updatedAt" }`.
 
@@ -253,7 +258,7 @@ The `idempotencyKey` is stored on the document but not returned by the API.
 | GET | `/transactions/{id}` | Bearer | Own transaction; admins can read any. |
 | PATCH | `/internal/transactions/{id}/status` | `X-Service-Token` | Finalize or advance status (alerting-service only). |
 | POST | `/internal/accounts/{userId}/unfreeze` | `X-Service-Token` | Unfreeze a wallet (admin flow via alerting-service). |
-| GET | `/health`, `/health/live`, `/metrics` | public (not routed by the gateway) | §0.6; readiness checks `mongo` and `rabbitmq`. |
+| GET | `/health`, `/health/live`, `/metrics` | public (not routed by the gateway) | §0.6; readiness requires `mongo`. `rabbitmq` is reported but does not fail readiness: the outbox absorbs broker outages (§9), so the service keeps accepting transfers. |
 
 **POST /wallet/deposit**: body `{ "amount": number }` → `200 { "wallet": {...} }`; `400`; `423 ACCOUNT_FROZEN`.
 
@@ -277,6 +282,7 @@ The `idempotencyKey` is stored on the document but not returned by the API.
   2. Call quick-scan `POST /score` with timeout `QUICK_SCAN_TIMEOUT_MS` (default 300 ms). No retry on the hot path.
   3. Not flagged → settle (debit held, credit recipient), then `APPROVED`, `riskTier: LOW`, `action: NONE`, `finalizedAt` set.
   4. Flagged, **or quick-scan error/timeout/non-200** → `UNDER_REVIEW`, write an outbox record, then publish `transaction.flagged` (§3). Funds stay held.
+  5. **Interrupted requests:** if the process dies between steps 1 and 3/4, the transaction is left `PENDING` with funds held. The outbox relay moves any transaction `PENDING` for longer than `PENDING_RECOVERY_SECONDS` (default 30) to `UNDER_REVIEW` (`quickScan.reason = QUICK_SCAN_UNAVAILABLE`, history reason `recovered after interruption`) and publishes it, so it is reviewed instead of stuck (toward review, never approval).
 
 **PATCH /internal/transactions/{id}/status**
 - Body:
@@ -309,7 +315,7 @@ Metrics: `transactions_created_total{status}`, `quick_scan_calls_total{result="o
 
 ## 3. RabbitMQ topology
 
-Services declare the topology idempotently at startup, using exactly the arguments below (a mismatch fails the declaration, so these arguments are part of the contract). Publishers declare the exchanges they publish to; consumers declare everything they consume.
+Services declare the topology idempotently at startup, using exactly the arguments below (a mismatch fails the declaration, so these arguments are part of the contract). Every service declares the full topology of each event it touches: its exchanges **and** its main, retry and dead-letter queues, whether the service publishes or consumes it. A publisher therefore never loses messages to "no queue bound yet" while its consumer is down or not yet deployed. Publishes also set `mandatory: true`, and a returned (unroutable) message counts as a failed publish.
 
 ### 3.1 Exchanges
 | Name | Type | Durable | Purpose |
@@ -372,7 +378,7 @@ All queues are durable. Consumers use `prefetch = 10` and manual acknowledgement
   "scoredAt": "..."
 }
 ```
-`idempotencyKey = "<transactionId>:scored"`. The `eventId` of a scored event is **deterministic**: UUIDv5(namespace `6ba7b811-9dad-11d1-80b4-00c04fd430c8`, idempotencyKey). A redelivered flagged message therefore produces a byte-identical scored event, and downstream dedup works without deep-scan keeping any state.
+`idempotencyKey = "<transactionId>:scored"`. The `eventId` of a scored event is **deterministic**: UUIDv5(namespace `6ba7b811-9dad-11d1-80b4-00c04fd430c8`, idempotencyKey). A redelivered flagged message therefore produces a scored event with the same `eventId`, `idempotencyKey` and score (only timestamps differ), and downstream dedup works without deep-scan keeping any state.
 
 ### 3.5 Consumer rules, retry and idempotency
 1. Parse and validate the envelope and payload. On a **malformed or schema-invalid** message (a poison message): `nack(requeue=false)` goes straight to the DLQ, with no retries.
@@ -562,13 +568,14 @@ Every service reads configuration only from the environment and ships a `.env.ex
 | Service | Variables |
 |---|---|
 | auth | `MONGO_URI`, `MONGO_DB=fraudguard_auth`, `JWT_SECRET`, `JWT_EXPIRES_IN=15m`, `BCRYPT_ROUNDS=12`, `LOGIN_RATE_LIMIT_MAX=5`, `INTERNAL_SERVICE_TOKEN`, `ADMIN_EMAIL`, `ADMIN_PASSWORD` |
-| transaction | `MONGO_URI`, `MONGO_DB=fraudguard_transactions`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `AUTH_SERVICE_URL`, `QUICK_SCAN_URL`, `QUICK_SCAN_TIMEOUT_MS=300`, `OUTBOX_RELAY_INTERVAL_MS=5000` |
+| transaction | `MONGO_URI`, `MONGO_DB=fraudguard_transactions`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `AUTH_SERVICE_URL`, `QUICK_SCAN_URL`, `QUICK_SCAN_TIMEOUT_MS=300`, `OUTBOX_RELAY_INTERVAL_MS=5000`, `PENDING_RECOVERY_SECONDS=30` |
 | quick-scan | `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD`, `MODEL_URI=models:/fraudguard-quick-scan@production`, `ALLOW_LOCAL_MODEL_FALLBACK=false`, `LOCAL_MODEL_PATH`, `QUICK_SCAN_THRESHOLD` (optional override) |
 | deep-scan | the MLflow variables above, `MODEL_URI=models:/fraudguard-deep-scan@production`, `ALLOW_LOCAL_MODEL_FALLBACK=false`, `LOCAL_MODEL_PATH`, `RABBITMQ_URL`, `TIER_MEDIUM_MIN=0.30`, `TIER_HIGH_MIN=0.70`, `TIER_CRITICAL_MIN=0.90`, `MAX_RETRIES=3`, `PREFETCH=10` |
 | alerting | `MONGO_URI`, `MONGO_DB=fraudguard_alerts`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `TRANSACTION_SERVICE_URL`, `TIER_ACTIONS_PATH`, `TIER_ACTIONS_POLL_SECONDS=30`, `OTP_TTL_SECONDS=300`, `OTP_MAX_ATTEMPTS=3`, `EXPOSE_SIMULATED_OTP=false`, `MAX_RETRIES=3` |
 | gateway | `CORS_ALLOWED_ORIGINS` |
 
 ## 11. Changelog
+- **1.3.0** (2026-09-30): no breaking changes. MongoDB runs as a single-node replica set, and money movements are multi-document transactions; recovery of interrupted `PENDING` transfers; every service declares the full topology of the events it touches, with mandatory publishes; transaction-service readiness no longer depends on RabbitMQ (the outbox covers outages); clarified that redelivered scored events share `eventId`/score but not timestamps.
 - **1.2.0** (2026-09-30): no breaking changes. Added §4.1 model loading (pinned version download, native loading with a service-owned skops allowlist, required metadata, XGBoost best-iteration scoring) and changed model-load failure to fail-fast.
 - **1.1.0** (2026-09-30): no breaking changes. The refresh/logout scope cut is now documented; the frontend demo risk profiles and the no-direct-scan-access rule are specified; tier-action reload is specified precisely (hash polling + manual endpoint); added retention/timeout rationale and explicit out-of-scope items.
 - **1.0.0** (2026-09-30): initial contract.

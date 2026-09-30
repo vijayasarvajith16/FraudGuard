@@ -37,6 +37,15 @@ class Metrics:
             "scan_latency_seconds", "Model scoring time (excludes HTTP)", buckets=LATENCY_BUCKETS, registry=r
         )
         self.risk_tiers = Counter("risk_tier_total", "Scored transactions by risk tier", ["tier"], registry=r)
+        self.queue_consumed = Counter(
+            "queue_messages_consumed_total", "transactions.flagged deliveries by outcome", ["result"], registry=r
+        )
+        self.queue_latency = Histogram(
+            "queue_processing_latency_seconds",
+            "Time from the flagged event's occurredAt to ack of its scored result",
+            buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 300),
+            registry=r,
+        )
         self.model_info = Gauge(
             "model_version_info", "Loaded model (value is always 1)", ["name", "version", "alias", "source"], registry=r
         )

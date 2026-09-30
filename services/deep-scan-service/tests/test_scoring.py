@@ -85,7 +85,7 @@ def test_missing_model_file_fails(tmp_path):
 def test_startup_fails_loudly_without_registry_or_fallback():
     with (
         pytest.raises(ModelLoadError, match="MLFLOW_TRACKING_URI is not set"),
-        TestClient(create_app(load_settings({}))),
+        TestClient(create_app(load_settings({"CONSUMER_ENABLED": "false"}))),
     ):
         pass
 
@@ -97,6 +97,8 @@ def test_startup_fails_loudly_without_registry_or_fallback():
         ({"TIER_CRITICAL_MIN": "1.0"}, "TIER_CRITICAL_MIN"),
         ({"TIER_MEDIUM_MIN": "0"}, "TIER_MEDIUM_MIN"),
         ({"ALLOW_LOCAL_MODEL_FALLBACK": "true"}, "LOCAL_MODEL_PATH is required"),
+        ({}, "RABBITMQ_URL is required when CONSUMER_ENABLED=true"),
+        ({"RABBITMQ_URL": "http://broker"}, "must be an amqp"),
     ],
 )
 def test_invalid_config_is_rejected(env, message):

@@ -69,7 +69,12 @@ def model_dir(tmp_path_factory, booster):
 
 
 def settings_for(model_dir, **overrides):
-    env = {"ALLOW_LOCAL_MODEL_FALLBACK": "true", "LOCAL_MODEL_PATH": str(model_dir), **overrides}
+    env = {
+        "ALLOW_LOCAL_MODEL_FALLBACK": "true",
+        "LOCAL_MODEL_PATH": str(model_dir),
+        "CONSUMER_ENABLED": "false",  # HTTP-only; the consumer has its own tests
+        **overrides,
+    }
     return load_settings(env)
 
 

@@ -4,12 +4,12 @@
 COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
-NODE_SERVICES := auth-service
+NODE_SERVICES := auth-service transaction-service
 PY_SERVICES := quick-scan-service deep-scan-service
 # Python interpreter with the service dev requirements installed (e.g. an activated venv).
 PYTHON ?= python
 
-.PHONY: help up down ps logs test lint ml-test ml-lint
+.PHONY: help up down ps logs test lint mongo-users test-integration ml-test ml-lint
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -20,6 +20,9 @@ up: ## Start the local stack and wait for healthchecks
 down: ## Stop the local stack (keeps volumes)
 	$(COMPOSE) down
 
+mongo-users: ## Create any missing per-service MongoDB users on the running stack (idempotent)
+	$(COMPOSE) exec mongodb sh -c 'mongosh --quiet -u "$$MONGO_INITDB_ROOT_USERNAME" -p "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin /docker-entrypoint-initdb.d/01-create-service-users.js'
+
 ps: ## Show container status
 	$(COMPOSE) ps
 
@@ -29,6 +32,9 @@ logs: ## Tail logs from all containers
 test: ## Run unit tests for every service
 	@set -e; for svc in $(NODE_SERVICES); do echo "==> test $$svc"; npm --prefix services/$$svc test; done
 	@set -e; for svc in $(PY_SERVICES); do echo "==> test $$svc"; (cd services/$$svc && $(PYTHON) -m pytest); done
+
+test-integration: ## Queue integration tests against the running compose RabbitMQ (throwaway vhosts)
+	@set -a; . ./.env; set +a; 	export RABBITMQ_TEST_URL="amqp://$$RABBITMQ_DEFAULT_USER:$$RABBITMQ_DEFAULT_PASS@127.0.0.1:$${RABBITMQ_HOST_PORT:-5672}"; 	export RABBITMQ_TEST_MGMT_URL="http://127.0.0.1:$${RABBITMQ_UI_HOST_PORT:-15672}"; 	npm --prefix services/transaction-service run test:integration && 	(cd services/deep-scan-service && $(PYTHON) -m pytest tests/test_consumer_integration.py)
 
 lint: ## Lint every service
 	@set -e; for svc in $(NODE_SERVICES); do echo "==> lint $$svc"; npm --prefix services/$$svc run lint; done

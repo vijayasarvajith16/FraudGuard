@@ -14,23 +14,42 @@ services:
   mongodb:
     image: mongo:7.0
     container_name: fraudguard-mongodb
-    command: ["mongod", "--wiredTigerCacheSizeGB", "0.25", "--quiet"]
+    hostname: mongodb
+    # Single-node replica set: required for multi-document transactions (docs/contracts.md §0.1).
+    entrypoint: ["bash", "/fraudguard/entrypoint.sh"]
+    command:
+      - mongod
+      - --replSet
+      - rs0
+      - --keyFile
+      - /tmp/mongo-keyfile
+      - --bind_ip_all
+      - --wiredTigerCacheSizeGB
+      - "0.25"
+      - --quiet
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-fraudguard}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-fraudguard-dev}
-      # Per-service users, created by infra/mongo/init on first volume initialization.
+      # Per-service users, created by infra/mongo/init (first volume init, or `make mongo-users`).
       MONGO_AUTH_PASSWORD: ${MONGO_AUTH_PASSWORD:?set MONGO_AUTH_PASSWORD in .env}
+      MONGO_TRANSACTIONS_PASSWORD: ${MONGO_TRANSACTIONS_PASSWORD:?set MONGO_TRANSACTIONS_PASSWORD in .env}
     ports:
       - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
     volumes:
       - mongo-data:/data/db
       - ./infra/mongo/init:/docker-entrypoint-initdb.d:ro
+      - ./infra/mongo:/fraudguard:ro
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('ping').ok ? 0 : 1)"]
+      # Initiates the replica set on first start; healthy once this node is a writable primary.
+      test:
+        - CMD-SHELL
+        - >-
+          mongosh --quiet -u "$$MONGO_INITDB_ROOT_USERNAME" -p "$$MONGO_INITDB_ROOT_PASSWORD"
+          --authenticationDatabase admin /fraudguard/healthcheck.js
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
+      timeout: 10s
+      retries: 6
+      start_period: 30s
     deploy:
       resources:
         limits:
@@ -51,9 +70,11 @@ services:
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
+      # rabbitmq-diagnostics boots an Erlang CLI VM (~3 s idle), so allow a generous timeout:
+      # under build or test load a tight one flips the broker to unhealthy and stalls dependents.
       test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
-      interval: 10s
-      timeout: 10s
+      interval: 15s
+      timeout: 20s
       retries: 6
       start_period: 30s
     deploy:
@@ -86,6 +107,43 @@ services:
     depends_on:
       mongodb:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+    restart: unless-stopped
+    logging: *default-logging
+
+  transaction-service:
+    build:
+      context: ./services/transaction-service
+    image: fraudguard/transaction-service:dev
+    container_name: fraudguard-transaction-service
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      TRUST_PROXY: 1
+      MONGO_URI: mongodb://transaction_service:${MONGO_TRANSACTIONS_PASSWORD}@mongodb:27017/fraudguard_transactions?authSource=fraudguard_transactions&replicaSet=rs0
+      MONGO_DB: fraudguard_transactions
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-fraudguard}:${RABBITMQ_DEFAULT_PASS:-fraudguard-dev}@rabbitmq:5672
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN:?set INTERNAL_SERVICE_TOKEN in .env}
+      AUTH_SERVICE_URL: http://auth-service:3001
+      QUICK_SCAN_URL: http://quick-scan-service:8001
+      QUICK_SCAN_TIMEOUT_MS: ${QUICK_SCAN_TIMEOUT_MS:-300}
+    ports:
+      - "127.0.0.1:${TRANSACTION_HOST_PORT:-3002}:3002"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      quick-scan-service:
+        condition: service_healthy
+      # Only started, not healthy: the outbox tolerates a broker that is still booting (contract §9).
+      rabbitmq:
+        condition: service_started
     deploy:
       resources:
         limits:
@@ -127,8 +185,15 @@ services:
       TIER_MEDIUM_MIN: ${TIER_MEDIUM_MIN:-0.30}
       TIER_HIGH_MIN: ${TIER_HIGH_MIN:-0.70}
       TIER_CRITICAL_MIN: ${TIER_CRITICAL_MIN:-0.90}
+      # Consumes transactions.flagged, publishes transactions.scored (docs/contracts.md §3).
+      RABBITMQ_URL: amqp://${RABBITMQ_DEFAULT_USER:-fraudguard}:${RABBITMQ_DEFAULT_PASS:-fraudguard-dev}@rabbitmq:5672
+      MAX_RETRIES: 3
+      PREFETCH: 10
     ports:
       - "127.0.0.1:${DEEP_SCAN_HOST_PORT:-8002}:8002"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     deploy:
       resources:
         limits:

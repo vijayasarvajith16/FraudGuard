@@ -34,7 +34,7 @@ USER app
 EXPOSE 8002
 
 # Readiness endpoint. The start period covers the model download at startup.
-HEALTHCHECK --interval=15s --timeout=3s --start-period=90s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=90s --retries=3 \
     CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen(f\"http://127.0.0.1:{os.environ.get('PORT', '8002')}/health\", timeout=2)"]
 
 CMD ["python", "-m", "app"]
