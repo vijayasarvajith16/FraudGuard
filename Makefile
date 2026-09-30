@@ -5,6 +5,9 @@ COMPOSE ?= docker compose
 
 .DEFAULT_GOAL := help
 NODE_SERVICES := auth-service
+PY_SERVICES := quick-scan-service deep-scan-service
+# Python interpreter with the service dev requirements installed (e.g. an activated venv).
+PYTHON ?= python
 
 .PHONY: help up down ps logs test lint ml-test ml-lint
 
@@ -25,9 +28,11 @@ logs: ## Tail logs from all containers
 
 test: ## Run unit tests for every service
 	@set -e; for svc in $(NODE_SERVICES); do echo "==> test $$svc"; npm --prefix services/$$svc test; done
+	@set -e; for svc in $(PY_SERVICES); do echo "==> test $$svc"; (cd services/$$svc && $(PYTHON) -m pytest); done
 
 lint: ## Lint every service
 	@set -e; for svc in $(NODE_SERVICES); do echo "==> lint $$svc"; npm --prefix services/$$svc run lint; done
+	@set -e; for svc in $(PY_SERVICES); do echo "==> lint $$svc"; (cd services/$$svc && ruff check . && ruff format --check .); done
 
 ml-test: ## Run ML pipeline sanity tests (synthetic data, no training)
 	cd ml && python -m pytest

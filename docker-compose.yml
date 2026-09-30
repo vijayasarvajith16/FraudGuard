@@ -93,6 +93,49 @@ services:
     restart: unless-stopped
     logging: *default-logging
 
+  # Scan services load their model from the MLflow registry at startup (docs/contracts.md §4.1)
+  # and exit non-zero if they cannot. Host ports are for local debugging only; the gateway
+  # never routes to them.
+  quick-scan-service:
+    build:
+      context: ./services/quick-scan-service
+    image: fraudguard/quick-scan-service:dev
+    container_name: fraudguard-quick-scan-service
+    environment: &scan-env
+      LOG_LEVEL: ${SCAN_LOG_LEVEL:-INFO}
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:?set MLFLOW_TRACKING_URI in .env}
+      MLFLOW_TRACKING_USERNAME: ${MLFLOW_TRACKING_USERNAME:-}
+      MLFLOW_TRACKING_PASSWORD: ${MLFLOW_TRACKING_PASSWORD:-}
+      MODEL_URI: models:/fraudguard-quick-scan@production
+    ports:
+      - "127.0.0.1:${QUICK_SCAN_HOST_PORT:-8001}:8001"
+    deploy:
+      resources:
+        limits:
+          memory: 320m  # measured ~180 MiB steady and under load
+    restart: unless-stopped
+    logging: *default-logging
+
+  deep-scan-service:
+    build:
+      context: ./services/deep-scan-service
+    image: fraudguard/deep-scan-service:dev
+    container_name: fraudguard-deep-scan-service
+    environment:
+      <<: *scan-env
+      MODEL_URI: models:/fraudguard-deep-scan@production
+      TIER_MEDIUM_MIN: ${TIER_MEDIUM_MIN:-0.30}
+      TIER_HIGH_MIN: ${TIER_HIGH_MIN:-0.70}
+      TIER_CRITICAL_MIN: ${TIER_CRITICAL_MIN:-0.90}
+    ports:
+      - "127.0.0.1:${DEEP_SCAN_HOST_PORT:-8002}:8002"
+    deploy:
+      resources:
+        limits:
+          memory: 384m  # measured ~125 MiB; headroom for the RabbitMQ consumer and prefetch (Phase 5)
+    restart: unless-stopped
+    logging: *default-logging
+
 volumes:
   mongo-data:
   rabbitmq-data:

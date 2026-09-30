@@ -1,0 +1,15 @@
+# deep-scan-service runtime. Model libraries MUST match ml/requirements.txt exactly:
+# a serialized model is only guaranteed to load with the library version that saved it.
+numpy==2.5.3
+# CPU-only build of the same XGBoost release used in training (ml/requirements.txt: xgboost==3.4.1).
+# Identical API and model format; omits the ~350 MB NVIDIA NCCL GPU dependency.
+xgboost-cpu==3.4.1
+mlflow-skinny==3.16.1
+
+fastapi==0.142.2
+pydantic==2.13.5
+uvicorn==0.54.0
+httptools==0.8.0
+uvloop==0.22.1; sys_platform != "win32"
+prometheus-client==0.26.0
+pyyaml==6.0.3

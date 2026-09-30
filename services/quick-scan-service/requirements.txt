@@ -1,0 +1,14 @@
+# quick-scan-service runtime. Model libraries MUST match ml/requirements.txt exactly:
+# a serialized model is only guaranteed to load with the library version that saved it.
+numpy==2.5.3
+scikit-learn==1.9.1
+skops==0.16.0
+mlflow-skinny==3.16.1
+
+fastapi==0.142.2
+pydantic==2.13.5
+uvicorn==0.54.0
+httptools==0.8.0
+uvloop==0.22.1; sys_platform != "win32"
+prometheus-client==0.26.0
+pyyaml==6.0.3

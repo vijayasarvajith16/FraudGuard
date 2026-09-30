@@ -49,7 +49,22 @@ Quick-scan's low PR-AUC is expected: it is an unsupervised filter tuned for reca
 - **Small positive count.** The test split contains 95 fraud cases, so each one is worth ~1.05 percentage points of recall. Differences of a few points between validation and test (e.g. quick-scan 90.4% → 84.2%) are within sampling noise.
 - **Where the misses are.** Of the 21 fraud cases that ended as LOW, 15 were never flagged by quick-scan and 6 were scored LOW by deep-scan. Quick-scan recall is the main lever for improvement.
 - **Probabilities are not calibrated.** Deep-scan uses `scale_pos_weight ≈ 598`, so its scores are operating points rather than frequencies. Almost every flagged fraud lands in CRITICAL; the MEDIUM and HIGH bands are thin.
-- **Latency.** Single-row scoring on Colab's shared CPU: quick-scan p50 12.7 ms / p95 21.8 ms, deep-scan p50 4.0 ms / p95 16.0 ms. Serving latency is measured in the scan services (Phase 4).
+- **Latency.** Training-time measurements on Colab's shared CPU (scikit-learn's generic `score_samples`): quick-scan p50 12.7 ms / p95 21.8 ms, deep-scan p50 4.0 ms / p95 16.0 ms. The serving numbers below are what the services actually achieve.
+
+## Serving latency (Phase 4, Docker on the dev laptop)
+
+Server-side model scoring (`scan_latency_seconds`) over 3,000 requests each, at concurrency 1 and 8:
+
+| Service | Scoring p95 | Under 20 ms (contract budget) | Throughput at concurrency 8 | Memory |
+|---|---|---|---|---|
+| quick-scan | ≤ 2.5 ms | 100% | ~227 req/s (1 process) | ~180 MiB |
+| deep-scan | ≤ 2.5 ms | 100% | ~215 req/s (1 process) | ~125 MiB |
+
+Two changes made this possible, with scores unchanged:
+1. **Quick-scan single-row fast path.** scikit-learn 1.9.1 dispatches each of the 100 trees as a joblib task, which dominated the cost of scoring one transaction (~15–25 ms in the container). The service performs the identical arithmetic directly: the maximum difference from `score_samples` over all 56,746 test rows is 0.0, with identical flag decisions (flag rate 6.1009%). It verifies itself against scikit-learn at startup and refuses to serve on any deviation.
+2. **Scoring inline on the event loop** instead of a thread pool. Scoring is ~1 ms of CPU, so threads only contended for the GIL; inline scoring is served first-in, first-out. Quick-scan throughput at concurrency 8 rose from ~99 to ~227 req/s, and the scoring tail fell from up to 100 ms to under 2.5 ms.
+
+Deep-scan tiers served by the container match the evaluation exactly (test-split fraud: 70 CRITICAL, 4 HIGH, 3 MEDIUM, 18 LOW). The service scores with the early-stopped 530 trees; scoring with all trees would shift probabilities by up to 0.084.
 
 ## Regression-gate floors
 

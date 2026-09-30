@@ -1,6 +1,6 @@
 # FraudGuard Service Contracts
 
-**Status:** authoritative. Contract version `1.1.0`.
+**Status:** authoritative. Contract version `1.2.0`.
 Change this file first, then the code. Any change that breaks a consumer bumps the major version and the message `version` field.
 
 This document defines every HTTP API, the transaction data model, the RabbitMQ topology, the risk policy, and failure behaviour. If code and this file disagree, the code is wrong.
@@ -404,6 +404,14 @@ All queues are durable. Consumers use `prefetch = 10` and manual acknowledgement
 - `400 VALIDATION_ERROR`; `503 MODEL_NOT_LOADED`.
 - Latency target: p95 < 20 ms in-process.
 
+### 4.1 Model loading (both scan services)
+- At startup the service resolves `MODEL_URI` (for example `models:/fraudguard-quick-scan@production`) to a concrete registry version, then downloads **that version** (never the alias again), so resolution and download cannot race with a promotion.
+- MLflow is used only to download artifacts. The native file is loaded directly: `model.skops` with the service's own skops allowlist (`sklearn.tree._tree.Tree`), ignoring the allowlist declared in the model; or `model.json` as an XGBoost `Booster`.
+- Required model metadata (in `MLmodel`): quick-scan `threshold`; deep-scan `best_iteration`. Deep-scan scores with `iteration_range=(0, best_iteration + 1)`; scoring with all trees would silently ignore early stopping.
+- The model's feature names must equal §0.8's order exactly, or startup fails.
+- **Failure is loud:** if the model cannot be loaded (registry unreachable, alias missing, metadata missing, features mismatched), the process logs at `fatal` and exits non-zero. The orchestrator restarts it with backoff, and it never serves with a default or partial model.
+- `ALLOW_LOCAL_MODEL_FALLBACK=true` plus `LOCAL_MODEL_PATH` (an MLflow model directory) is used only in tests and offline development. `/health` then reports `"source": "local"`.
+
 Metrics: `scan_requests_total{result="flagged|clean|error"}`, `scan_latency_seconds` (histogram), `scan_flagged_total`, `model_version_info{name,version}` (gauge = 1).
 
 ## 5. deep-scan-service (XGBoost)
@@ -522,7 +530,7 @@ Metrics: `alerts_created_total{tier,action}`, `otp_verifications_total{result="s
 | quick-scan down, times out, or returns non-200 | Treat as **flagged**: `UNDER_REVIEW`, `quickScan.reason = QUICK_SCAN_UNAVAILABLE`, publish to `transactions.flagged`. `quick_scan_calls_total{result="timeout|error"}` increments. | Approve without a successful quick-scan. |
 | RabbitMQ down at publish time | The transaction stays `UNDER_REVIEW` with an unpublished outbox entry; the relay publishes it once the broker recovers. `POST /transactions` still returns `201`. | Lose the event, or approve. |
 | deep-scan down or lagging | Messages wait durably in `transactions.flagged`; the transactions stay `UNDER_REVIEW` with funds held. Queue depth and consumer lag are alerted on (Phase 13). | Auto-approve on a timeout. |
-| deep-scan model fails to load | The service stays not-ready (`503` on `/health`) and does not consume. | Score with a default or dummy model. |
+| a scan service's model fails to load at startup | Process exits non-zero (§4.1); the container restarts with backoff. For quick-scan, transaction-service meanwhile treats calls as failed (toward review); for deep-scan, flagged messages wait in the queue. | Score with a default or dummy model. |
 | alerting down | `transactions.scored` backs up; statuses stay `UNDER_REVIEW` until it recovers. | Apply a tier action twice (idempotency §3.5). |
 | alerting cannot reach transaction-service | Retry through the retry queue (§3.5); after `MAX_RETRIES`, dead-lettered for manual replay. | Ack before the status update succeeds. |
 | Poison message | Dead-lettered immediately. | Requeue forever. |
@@ -561,5 +569,6 @@ Every service reads configuration only from the environment and ships a `.env.ex
 | gateway | `CORS_ALLOWED_ORIGINS` |
 
 ## 11. Changelog
+- **1.2.0** (2026-09-30): no breaking changes. Added §4.1 model loading (pinned version download, native loading with a service-owned skops allowlist, required metadata, XGBoost best-iteration scoring) and changed model-load failure to fail-fast.
 - **1.1.0** (2026-09-30): no breaking changes. The refresh/logout scope cut is now documented; the frontend demo risk profiles and the no-direct-scan-access rule are specified; tier-action reload is specified precisely (hash polling + manual endpoint); added retention/timeout rationale and explicit out-of-scope items.
 - **1.0.0** (2026-09-30): initial contract.
