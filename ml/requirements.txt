@@ -1,0 +1,11 @@
+# FraudGuard ML training + evaluation. Pinned so Colab runs are reproducible.
+# scikit-learn and xgboost MUST match the scan services' requirements (Phase 4):
+# serialized models are only guaranteed to load with the version that saved them.
+# Isolation Forest is stored with skops (no pickle), XGBoost as native JSON.
+numpy==2.5.3
+pandas==3.0.6
+scikit-learn==1.9.1
+xgboost==3.4.1
+mlflow==3.16.1
+matplotlib==3.11.2
+skops==0.16.0

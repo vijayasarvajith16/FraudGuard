@@ -1,0 +1,28 @@
+[project]
+name = "fraudguard-ml"
+version = "1.0.0"
+description = "FraudGuard training and evaluation pipeline (quick-scan Isolation Forest, deep-scan XGBoost)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::FutureWarning",
+    "ignore::UserWarning:mlflow.*",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "NPY", "PTH", "RUF"]
+ignore = ["PTH123"]  # open() is fine for simple reads
+
+[tool.ruff.lint.isort]
+known-first-party = ["common", "data", "metrics", "evaluate", "train_quick_scan", "train_deep_scan"]

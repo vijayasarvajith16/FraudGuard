@@ -38,10 +38,11 @@ ml/data/*
 !ml/data/.gitkeep
 *.pkl
 *.joblib
-ml/artifacts/**/*.json
-ml/artifacts/**/*.ubj
+ml/artifacts/
 mlruns/
 mlartifacts/
+mlflow.db
+*.db-journal
 
 # ---- Terraform ----
 .terraform/

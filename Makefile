@@ -6,7 +6,7 @@ COMPOSE ?= docker compose
 .DEFAULT_GOAL := help
 NODE_SERVICES := auth-service
 
-.PHONY: help up down ps logs test lint
+.PHONY: help up down ps logs test lint ml-test ml-lint
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -28,3 +28,9 @@ test: ## Run unit tests for every service
 
 lint: ## Lint every service
 	@set -e; for svc in $(NODE_SERVICES); do echo "==> lint $$svc"; npm --prefix services/$$svc run lint; done
+
+ml-test: ## Run ML pipeline sanity tests (synthetic data, no training)
+	cd ml && python -m pytest
+
+ml-lint: ## Lint ML code with ruff
+	cd ml && ruff check . && ruff format --check .
