@@ -275,3 +275,87 @@ tests:
             exp_annotations:
               summary: 8 CRITICAL verdicts in the last 10 minutes
               description: A burst of CRITICAL risk tiers (accounts frozen). Check the admin review queue for a fraud campaign or a bad model.
+
+  # ---- models (drift) ----------------------------------------------------------------------------
+  - name: QuickScanFlagRateDrift fires when the flag rate triples against the model's expectation
+    interval: 1m
+    input_series:
+      # 1 transaction/s: 0.2/s flagged, 0.8/s clean -> 20% against an expected 6% (3.3x).
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="flagged"}'
+        values: "0+12x80"
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="clean"}'
+        values: "0+48x80"
+      - series: 'model_expected_flag_rate{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", version="2"}'
+        values: "0.06x80"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: QuickScanFlagRateDrift
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: QuickScanFlagRateDrift
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: quick-scan flags 3.3x the rate the model expects
+              description: "The last hour's flag rate is over twice, or under half, the loaded model's validation flag rate. Compare the score distribution on the fraud pipeline dashboard; retrain or roll back if the model is at fault (docs/mlops.md)."
+
+  - name: QuickScanFlagRateDrift fires when quick-scan stops flagging
+    interval: 1m
+    input_series:
+      # 1 of 60 flagged (1.7%) against an expected 6% (0.3x).
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="flagged"}'
+        values: "0+1x80"
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="clean"}'
+        values: "0+59x80"
+      - series: 'model_expected_flag_rate{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", version="2"}'
+        values: "0.06x80"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: QuickScanFlagRateDrift
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: quick-scan flags 0.3x the rate the model expects
+              description: "The last hour's flag rate is over twice, or under half, the loaded model's validation flag rate. Compare the score distribution on the fraud pipeline dashboard; retrain or roll back if the model is at fault (docs/mlops.md)."
+
+  - name: QuickScanFlagRateDrift stays quiet near the expected rate, at low traffic and without a baseline
+    interval: 1m
+    input_series:
+      # Enough traffic and a baseline, but near the expected rate: 4 of 60 flagged = 6.7%, 1.1x.
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="flagged"}'
+        values: "0+4x80"
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="clean"}'
+        values: "0+56x80"
+      - series: 'model_expected_flag_rate{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", version="2"}'
+        values: "0.06x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: QuickScanFlagRateDrift
+        exp_alerts: []
+
+  - name: QuickScanFlagRateDrift needs traffic
+    interval: 1m
+    input_series:
+      # 50% flagged, but only 2 transactions a minute (0.033/s).
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="flagged"}'
+        values: "0+1x80"
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="clean"}'
+        values: "0+1x80"
+      - series: 'model_expected_flag_rate{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", version="2"}'
+        values: "0.06x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: QuickScanFlagRateDrift
+        exp_alerts: []
+
+  - name: QuickScanFlagRateDrift needs a baseline (no model_expected_flag_rate, e.g. a local model)
+    interval: 1m
+    input_series:
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="flagged"}'
+        values: "0+30x80"
+      - series: 'scan_requests_total{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", result="clean"}'
+        values: "0+30x80"
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: QuickScanFlagRateDrift
+        exp_alerts: []

@@ -471,7 +471,7 @@
     },
     {
       "type": "row",
-      "title": "Fraud detection",
+      "title": "Models (docs/mlops.md)",
       "id": 8,
       "collapsed": false,
       "panels": [],
@@ -480,6 +480,430 @@
         "w": 24,
         "x": 0,
         "y": 5
+      }
+    },
+    {
+      "type": "stat",
+      "title": "quick-scan model",
+      "description": "Registry version of the Isolation Forest the quick-scan pods run (pinned in Git; promotion changes it).",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (version) (model_version_info{app_kubernetes_io_name=\"quick-scan-service\"})",
+          "legendFormat": "v{{version}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "unknown"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "id": 9,
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "deep-scan model",
+      "description": "Registry version of the XGBoost model the deep-scan pods run.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max by (version) (model_version_info{app_kubernetes_io_name=\"deep-scan-service\"})",
+          "legendFormat": "v{{version}}",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "blue"
+          },
+          "noValue": "unknown"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "background",
+        "graphMode": "none",
+        "textMode": "name",
+        "justifyMode": "center",
+        "orientation": "auto",
+        "wideLayout": true,
+        "showPercentChange": false
+      },
+      "id": 10,
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 4,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "quick-scan flag rate vs the model's expectation",
+      "description": "Live flag rate, the 1-hour rate the drift alert uses, and the rate the loaded model had on validation data. The alert fires above 2x or below half of it for 30 minutes.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(scan_requests_total{app_kubernetes_io_name=\"quick-scan-service\", result=\"flagged\"}[$__rate_interval])) / sum(rate(scan_requests_total{app_kubernetes_io_name=\"quick-scan-service\", result=~\"flagged|clean\"}[$__rate_interval]))",
+          "legendFormat": "flag rate",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(scan_requests_total{app_kubernetes_io_name=\"quick-scan-service\", result=\"flagged\"}[1h])) / sum(rate(scan_requests_total{app_kubernetes_io_name=\"quick-scan-service\", result=~\"flagged|clean\"}[1h]))",
+          "legendFormat": "flag rate (1 h)",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(model_expected_flag_rate{app_kubernetes_io_name=\"quick-scan-service\"})",
+          "legendFormat": "expected (model)",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "expected (model)"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "blue"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 11,
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 8,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "quick-scan score distribution",
+      "description": "Anomaly scores of the scored transactions over time (the model flags above its threshold, ~0.39 for v2). A shifting distribution is drift in the traffic or the model.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "expr": "sum by (le) (increase(scan_score_bucket{app_kubernetes_io_name=\"quick-scan-service\"}[$__rate_interval]))",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "axisPlacement": "left",
+          "unit": "short",
+          "decimals": 2
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "cellGap": 1,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "steps": 64,
+          "reverse": false
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "showValue": "never",
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "legend": {
+          "show": true
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        }
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 14,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "heatmap",
+      "title": "deep-scan probability distribution",
+      "description": "Fraud probabilities of the flagged transactions over time; the bucket edges include the tier thresholds 0.30 / 0.70 / 0.90.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "expr": "sum by (le) (increase(scan_score_bucket{app_kubernetes_io_name=\"deep-scan-service\"}[$__rate_interval]))",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            }
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "calculate": false,
+        "yAxis": {
+          "axisPlacement": "left",
+          "unit": "short",
+          "decimals": 2
+        },
+        "rowsFrame": {
+          "layout": "auto"
+        },
+        "cellGap": 1,
+        "color": {
+          "mode": "scheme",
+          "scheme": "Oranges",
+          "scale": "exponential",
+          "exponent": 0.5,
+          "fill": "dark-orange",
+          "steps": 64,
+          "reverse": false
+        },
+        "filterValues": {
+          "le": 1e-09
+        },
+        "showValue": "never",
+        "tooltip": {
+          "mode": "single",
+          "yHistogram": false,
+          "showColorScale": false
+        },
+        "legend": {
+          "show": true
+        },
+        "exemplars": {
+          "color": "rgba(255,0,255,0.7)"
+        }
+      },
+      "id": 13,
+      "gridPos": {
+        "h": 8,
+        "w": 5,
+        "x": 19,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "row",
+      "title": "Fraud detection",
+      "id": 14,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 14
       }
     },
     {
@@ -574,12 +998,12 @@
           "sort": "desc"
         }
       },
-      "id": 9,
+      "id": 15,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 6
+        "y": 15
       },
       "datasource": {
         "type": "prometheus",
@@ -658,12 +1082,12 @@
           "sort": "desc"
         }
       },
-      "id": 10,
+      "id": 16,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 6
+        "y": 15
       },
       "datasource": {
         "type": "prometheus",
@@ -836,12 +1260,12 @@
           "sort": "none"
         }
       },
-      "id": 11,
+      "id": 17,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 6
+        "y": 15
       },
       "datasource": {
         "type": "prometheus",
@@ -1000,12 +1424,12 @@
           "sort": "desc"
         }
       },
-      "id": 12,
+      "id": 18,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 14
+        "y": 23
       },
       "datasource": {
         "type": "prometheus",
@@ -1134,12 +1558,12 @@
           "sort": "desc"
         }
       },
-      "id": 13,
+      "id": 19,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 14
+        "y": 23
       },
       "datasource": {
         "type": "prometheus",
@@ -1149,14 +1573,14 @@
     {
       "type": "row",
       "title": "Latency",
-      "id": 14,
+      "id": 20,
       "collapsed": false,
       "panels": [],
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 22
+        "y": 31
       }
     },
     {
@@ -1235,12 +1659,12 @@
           "sort": "desc"
         }
       },
-      "id": 15,
+      "id": 21,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 23
+        "y": 32
       },
       "datasource": {
         "type": "prometheus",
@@ -1323,12 +1747,12 @@
           "sort": "desc"
         }
       },
-      "id": 16,
+      "id": 22,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 23
+        "y": 32
       },
       "datasource": {
         "type": "prometheus",
@@ -1418,12 +1842,12 @@
           "sort": "desc"
         }
       },
-      "id": 17,
+      "id": 23,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 23
+        "y": 32
       },
       "datasource": {
         "type": "prometheus",
@@ -1433,14 +1857,14 @@
     {
       "type": "row",
       "title": "Queues",
-      "id": 18,
+      "id": 24,
       "collapsed": false,
       "panels": [],
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 40
       }
     },
     {
@@ -1504,12 +1928,12 @@
           "sort": "desc"
         }
       },
-      "id": 19,
+      "id": 25,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 32
+        "y": 41
       },
       "datasource": {
         "type": "prometheus",
@@ -1610,12 +2034,12 @@
           "sort": "desc"
         }
       },
-      "id": 20,
+      "id": 26,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 32
+        "y": 41
       },
       "datasource": {
         "type": "prometheus",
@@ -1683,12 +2107,12 @@
           "sort": "desc"
         }
       },
-      "id": 21,
+      "id": 27,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 32
+        "y": 41
       },
       "datasource": {
         "type": "prometheus",
@@ -1698,14 +2122,14 @@
     {
       "type": "row",
       "title": "Errors",
-      "id": 22,
+      "id": 28,
       "collapsed": false,
       "panels": [],
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 49
       }
     },
     {
@@ -1773,12 +2197,12 @@
           "sort": "desc"
         }
       },
-      "id": 23,
+      "id": 29,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 41
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -1846,12 +2270,12 @@
           "sort": "desc"
         }
       },
-      "id": 24,
+      "id": 30,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 41
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -1980,12 +2404,12 @@
           "sort": "desc"
         }
       },
-      "id": 25,
+      "id": 31,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 41
+        "y": 50
       },
       "datasource": {
         "type": "prometheus",
@@ -2038,12 +2462,12 @@
           }
         }
       ],
-      "id": 26,
+      "id": 32,
       "gridPos": {
         "h": 7,
         "w": 16,
         "x": 0,
-        "y": 49
+        "y": 58
       },
       "datasource": {
         "type": "prometheus",
@@ -2102,12 +2526,12 @@
           }
         }
       ],
-      "id": 27,
+      "id": 33,
       "gridPos": {
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 49
+        "y": 58
       },
       "datasource": {
         "type": "prometheus",
