@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../auth/context.js';
 import { ErrorNotice } from '../components/ErrorNotice.jsx';
+import { usePageTitle } from '../hooks/usePageTitle.js';
 
 function AuthShell({ title, subtitle, children }) {
   return (
@@ -20,6 +21,7 @@ function AuthShell({ title, subtitle, children }) {
 }
 
 export function LoginPage() {
+  usePageTitle('Sign in');
   const { user, login, notice } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -88,6 +90,7 @@ export function LoginPage() {
 }
 
 export function RegisterPage() {
+  usePageTitle('Create account');
   const { user, register } = useAuth();
   const navigate = useNavigate();
   const [form, setForm] = useState({ name: '', email: '', password: '' });

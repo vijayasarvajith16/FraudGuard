@@ -6,6 +6,7 @@ import { ErrorNotice } from '../components/ErrorNotice.jsx';
 import { TransactionDetails } from '../components/TransactionDetails.jsx';
 import { formatDateTime, formatMoney, formatPercent, shortId } from '../lib/format.js';
 import { ACTION_LABELS, STATUS_LABELS } from '../lib/transactions.js';
+import { usePageTitle } from '../hooks/usePageTitle.js';
 
 function ReviewCard({ review, onDecided }) {
   const { api } = useAuth();
@@ -242,6 +243,7 @@ function PolicyPanel() {
 }
 
 export function AdminPage() {
+  usePageTitle('Review queue');
   return (
     <div className="page">
       <h1>Administration</h1>
