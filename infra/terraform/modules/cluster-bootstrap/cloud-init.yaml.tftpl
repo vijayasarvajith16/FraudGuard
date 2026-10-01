@@ -1,0 +1,53 @@
+#cloud-config
+# FraudGuard cluster bootstrap (rendered by Terraform: modules/cluster-bootstrap).
+# Installs k3s ${k3s_version} and Argo CD ${argocd_version} on first boot.
+# Progress: /var/log/fraudguard-bootstrap.log   Done marker: /var/lib/fraudguard/bootstrap.done
+write_files:
+  - path: /usr/local/sbin/fraudguard-bootstrap.sh
+    permissions: "0750"
+    owner: root:root
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      exec >>/var/log/fraudguard-bootstrap.log 2>&1
+      log() { echo "[$(date -Is)] $*"; }
+      log "bootstrap start"
+      mkdir -p /var/lib/fraudguard
+
+      # 1. Host firewall. Oracle's Ubuntu images ship iptables rules that REJECT every inbound packet
+      #    except SSH, and every forwarded packet: that would block the ingress (80/443), the API
+      #    (6443) and pod networking. The VCN security list (modules/network) is the firewall, so
+      #    remove only those REJECT rules.
+      if [ -f /etc/iptables/rules.v4 ]; then
+        sed -i '/-j REJECT --reject-with icmp-host-prohibited/d' /etc/iptables/rules.v4
+        iptables-restore < /etc/iptables/rules.v4
+        log "removed the image's REJECT rules"
+      fi
+
+      # 2. k3s, pinned: the installer comes from the release's own git tag, and it verifies the
+      #    binary against the release checksums. The bundled Traefik is the ingress controller, the
+      #    same one the local kind cluster uses (docs/kubernetes.md).
+      curl -fsSL --retry 5 "https://raw.githubusercontent.com/k3s-io/k3s/${k3s_version_urlencoded}/install.sh" -o /tmp/k3s-install.sh
+      INSTALL_K3S_VERSION="${k3s_version}" sh /tmp/k3s-install.sh server --write-kubeconfig-mode 0600
+      export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+      until kubectl get nodes 2>/dev/null | grep -q " Ready "; do sleep 5; done
+      log "k3s node ready"
+      until kubectl -n kube-system get deploy/traefik >/dev/null 2>&1; do sleep 5; done
+      kubectl -n kube-system rollout status deploy/traefik --timeout=10m
+      log "traefik ready"
+
+      # 3. Argo CD, pinned and verified: the manifest must match the SHA-256 committed in Terraform.
+      curl -fsSL --retry 5 "https://raw.githubusercontent.com/argoproj/argo-cd/${argocd_version}/manifests/install.yaml" -o /tmp/argocd-install.yaml
+      echo "${argocd_manifest_sha256}  /tmp/argocd-install.yaml" | sha256sum --check --strict
+      kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+      # Server-side apply: Argo CD's CRDs exceed the client-side annotation size limit.
+      kubectl apply -n argocd --server-side --force-conflicts -f /tmp/argocd-install.yaml
+      kubectl -n argocd rollout status deploy/argocd-server --timeout=10m
+      kubectl -n argocd rollout status deploy/argocd-repo-server --timeout=10m
+      log "argo cd ready"
+
+      touch /var/lib/fraudguard/bootstrap.done
+      log "bootstrap complete"
+
+runcmd:
+  - [bash, /usr/local/sbin/fraudguard-bootstrap.sh]

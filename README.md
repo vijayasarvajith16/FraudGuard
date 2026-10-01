@@ -14,6 +14,8 @@ The full README (architecture, results, deployment) arrives in Phase 15; see [do
 | deep-scan-service | [![deep-scan-service](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/deep-scan-service.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/deep-scan-service.yml) |
 | api-gateway | [![api-gateway](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/api-gateway.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/api-gateway.yml) |
 | frontend | [![frontend](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/frontend.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/frontend.yml) |
+| Helm charts | [![helm](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/helm.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/helm.yml) |
+| Terraform | [![terraform](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/terraform.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/terraform.yml) |
 | ml pipeline | [![ml](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/ml.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/ml.yml) |
 | end-to-end (PRs) | [![e2e](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/e2e.yml/badge.svg)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/e2e.yml) |
 | CodeQL | [![codeql](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/codeql.yml) |
@@ -26,6 +28,8 @@ How the pipelines work, the image tags and branch protection: [docs/ci.md](docs/
 - Service contracts: [docs/contracts.md](docs/contracts.md)
 - Testing: [docs/testing.md](docs/testing.md)
 - CI/CD: [docs/ci.md](docs/ci.md)
+- Kubernetes (Helm on kind): [docs/kubernetes.md](docs/kubernetes.md)
+- Cloud demo environment (Terraform on Oracle Cloud): [docs/terraform.md](docs/terraform.md)
 - ML results: [docs/ml-results.md](docs/ml-results.md)
 - Project conventions: [CLAUDE.md](CLAUDE.md)
 
@@ -40,6 +44,8 @@ make test    # unit tests for every service, the frontend and the tools
 make e2e     # end-to-end suite against the stack
 make down    # stop (keeps data volumes)
 ```
+
+On Kubernetes instead: `make k8s-up` (kind + Traefik, then http://localhost:8089; see docs/kubernetes.md).
 
 The UI and API are served by the gateway at `http://localhost:${GATEWAY_HOST_PORT}` (default 8080).
 `make help` lists every target.

@@ -1,0 +1,70 @@
+# Terraform for the cloud demo environment (infra/terraform, docs/terraform.md): formatting,
+# validation against the pinned providers, and an IaC security scan. CI never plans or applies:
+# that needs the owner's cloud credentials and is run by hand.
+name: terraform
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/terraform/**
+      - .github/workflows/terraform.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - infra/terraform/**
+      - .github/workflows/terraform.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.74.0
+  CHECKOV_IMAGE: bridgecrew/checkov@sha256:9aefe56582004ebdac112fe85c3268dc4d3658231a8f023fb714ba9d29539d53 # 3.3.21
+
+jobs:
+  checks:
+    name: fmt, validate, scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra/terraform
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+
+      - name: Format
+        run: terraform fmt -check -recursive -diff
+
+      # -lockfile=readonly: the providers must match the committed .terraform.lock.hcl hashes.
+      - name: Init (no backend, no credentials)
+        run: terraform init -backend=false -input=false -lockfile=readonly
+
+      - name: Validate
+        run: terraform validate
+
+      # Two scanners on purpose: Trivy's Terraform rules barely cover Oracle Cloud (a security list
+      # opening SSH to 0.0.0.0/0 goes unnoticed, verified), while Checkov's CKV_OCI_* rules catch it,
+      # plus legacy metadata endpoints and unencrypted boot-volume traffic. Trivy stays for its
+      # generic Terraform checks.
+      - name: IaC security scan (Trivy; fails on HIGH/CRITICAL)
+        run: |
+          docker run --rm -v "$PWD:/src:ro" "$TRIVY_IMAGE" config \
+            --skip-dirs /src/.terraform --severity HIGH,CRITICAL --exit-code 1 /src
+
+      - name: IaC security scan (Checkov OCI rules; fails on any failed check)
+        run: |
+          docker run --rm -v "$PWD:/src:ro" "$CHECKOV_IMAGE" \
+            -d /src --framework terraform --skip-path .terraform --compact
