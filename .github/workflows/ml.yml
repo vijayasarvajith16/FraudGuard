@@ -1,0 +1,52 @@
+# ML pipeline checks: lint and the sanity tests on synthetic data with tiny models.
+# Real training happens in Colab (ml/notebooks); CI never trains or touches the dataset.
+name: ml
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ml/**
+      - .github/workflows/ml.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - ml/**
+      - .github/workflows/ml.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: lint, sanity tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13" # the Colab runtime the models are trained on
+          cache: pip
+          cache-dependency-path: ml/requirements*.txt
+
+      - run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+
+      - name: Lint and format check
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Sanity tests (synthetic data, tiny models)
+        run: python -m pytest

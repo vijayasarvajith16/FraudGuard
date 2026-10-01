@@ -1,0 +1,92 @@
+# Weekly dependency updates, grouped so each ecosystem opens at most a few PRs a week.
+# Every update PR runs the same pipelines as any other change (path-filtered service CI, e2e).
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directories:
+      - /services/auth-service
+      - /services/transaction-service
+      - /services/alerting-service
+      - /frontend
+    # Wait a week after a release before proposing it: compromised packages are usually
+    # caught and yanked within days of publication.
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: pip
+    directories:
+      - /services/quick-scan-service
+      - /services/deep-scan-service
+      - /ml
+      - /
+    # Wait a week after a release before proposing it: compromised packages are usually
+    # caught and yanked within days of publication.
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Model libraries are bumped together by hand: a serialized model only reliably loads with the
+    # library versions that trained it, so ml/ and both scan services must change in one PR followed
+    # by a retrain (docs/ml-results.md). Dependabot must not move one service on its own.
+    ignore:
+      - dependency-name: numpy
+      - dependency-name: scikit-learn
+      - dependency-name: skops
+      - dependency-name: xgboost
+      - dependency-name: xgboost-cpu
+      - dependency-name: mlflow
+      - dependency-name: mlflow-skinny
+    groups:
+      pip-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: docker
+    directories:
+      - /services/auth-service
+      - /services/transaction-service
+      - /services/alerting-service
+      - /services/quick-scan-service
+      - /services/deep-scan-service
+      - /services/api-gateway
+      - /frontend
+    # Wait a week after a release before proposing it: compromised packages are usually
+    # caught and yanked within days of publication.
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      base-images:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(docker)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    # Wait a week after a release before proposing it: compromised packages are usually
+    # caught and yanked within days of publication.
+    cooldown:
+      default-days: 7
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore(ci)"

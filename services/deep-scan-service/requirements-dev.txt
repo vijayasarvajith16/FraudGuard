@@ -1,5 +1,6 @@
 -r requirements.txt
 pytest==9.1.1
+pytest-cov==7.1.0
 httpx2==2.13.1  # Starlette TestClient transport
 pandas==3.0.6  # tests only: fixture models are trained on DataFrames (feature names)
 ruff==0.16.9

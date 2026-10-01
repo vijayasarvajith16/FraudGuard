@@ -1,0 +1,44 @@
+# Demo tooling (tools/: replay, sample generation, .env generation). Standard library only.
+name: tools
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - tools/**
+      - .github/workflows/tools.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - tools/**
+      - .github/workflows/tools.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    name: lint, tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: tools
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - run: python -m pip install --disable-pip-version-check pytest==9.1.1 ruff==0.16.9
+
+      - name: Lint and format check
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - run: python -m pytest
