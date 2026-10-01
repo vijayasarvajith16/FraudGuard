@@ -134,6 +134,35 @@ serverFiles:
               summary: "{{ $value | humanizePercentage }} of quick-scan calls time out or fail"
               description: "Affected transfers go to deep-scan review instead of instant approval."
 
+      - name: fraudguard.models
+        rules:
+          # Drift (docs/mlops.md): quick-scan's flag rate over the last hour against the rate the
+          # loaded model had on validation data (model_expected_flag_rate). More than twice or less
+          # than half of it means the traffic or the model changed: a fraud wave, a new kind of
+          # client, a feature problem. Quiet while the baseline is unknown (scalar() of nothing is
+          # NaN) and below 0.05 req/s, where an hour holds too few transactions.
+          - alert: QuickScanFlagRateDrift
+            expr: |
+              (
+                sum(rate(scan_requests_total{app_kubernetes_io_name="quick-scan-service", result="flagged"}[1h]))
+                  / sum(rate(scan_requests_total{app_kubernetes_io_name="quick-scan-service", result=~"flagged|clean"}[1h]))
+                  / scalar(max(model_expected_flag_rate{app_kubernetes_io_name="quick-scan-service"}))
+                > 2
+              or
+                sum(rate(scan_requests_total{app_kubernetes_io_name="quick-scan-service", result="flagged"}[1h]))
+                  / sum(rate(scan_requests_total{app_kubernetes_io_name="quick-scan-service", result=~"flagged|clean"}[1h]))
+                  / scalar(max(model_expected_flag_rate{app_kubernetes_io_name="quick-scan-service"}))
+                < 0.5
+              )
+              and
+              sum(rate(scan_requests_total{app_kubernetes_io_name="quick-scan-service", result=~"flagged|clean"}[1h])) > 0.05
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: 'quick-scan flags {{ $value | printf "%.1f" }}x the rate the model expects'
+              description: "The last hour's flag rate is over twice, or under half, the loaded model's validation flag rate. Compare the score distribution on the fraud pipeline dashboard; retrain or roll back if the model is at fault (docs/mlops.md)."
+
       - name: fraudguard.risk
         rules:
           # At least 5 CRITICAL verdicts in 10 minutes, and more than 3x the rate of the 6 hours
