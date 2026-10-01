@@ -30,6 +30,8 @@ How the pipelines work, the image tags and branch protection: [docs/ci.md](docs/
 - CI/CD: [docs/ci.md](docs/ci.md)
 - Kubernetes (Helm on kind): [docs/kubernetes.md](docs/kubernetes.md)
 - GitOps release flow (Argo CD): [docs/gitops.md](docs/gitops.md)
+- Monitoring, alerts and autoscaling (Prometheus, Grafana, HPA): [docs/monitoring.md](docs/monitoring.md)
+- Performance (k6 load test results): [docs/performance.md](docs/performance.md)
 - Cloud environment as code (Terraform for Oracle Cloud; written, not applied): [docs/terraform.md](docs/terraform.md)
 - ML results: [docs/ml-results.md](docs/ml-results.md)
 - Project conventions: [CLAUDE.md](CLAUDE.md)
@@ -47,7 +49,8 @@ make down    # stop (keeps data volumes)
 ```
 
 On Kubernetes instead: `make k8s-up` (kind + Traefik + Argo CD, which deploys from Git; then
-http://localhost:8089; see docs/kubernetes.md and docs/gitops.md).
+http://localhost:8089, and Grafana at http://localhost:8089/grafana/; see docs/kubernetes.md,
+docs/gitops.md and docs/monitoring.md). `make load-test` runs the k6 load test (docs/performance.md).
 
 The UI and API are served by the gateway at `http://localhost:${GATEWAY_HOST_PORT}` (default 8080).
 `make help` lists every target.

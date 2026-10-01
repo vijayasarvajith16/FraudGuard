@@ -47,8 +47,9 @@ Only the service that changed is rebuilt, retagged and rolled out: the pipelines
 |---|---|---|
 | Image pipeline | `.github/workflows/_container-image.yml` | On a push to `main`: pushes `sha-<commit>` to GHCR, then the `release` job commits the tag into `infra/helm/values/values-<service>.yaml`. |
 | Root application | `infra/argocd/root.yaml` | Applied once by `make k8s-up`; renders the app-of-apps from Git. |
-| App-of-apps | `infra/argocd/apps/` | The `fraudguard` AppProject and one Application per component, each following `targetRevision`. |
+| App-of-apps | `infra/argocd/apps/` | The `fraudguard` AppProject and one Application per component, each following `targetRevision`; the `platform` AppProject for monitoring (below). |
 | Service charts | `infra/helm/` | What each Application renders: the shared service chart plus MongoDB and RabbitMQ. |
+| Monitoring | `infra/monitoring/` | Prometheus, Grafana, prometheus-adapter and metrics-server: upstream charts at pinned versions, each a multi-source Application (the chart, plus this repository for its values files), and the dashboards via kustomize (docs/monitoring.md). |
 | Argo CD settings | `infra/argocd/install/argocd-cm.yaml` | 60 s polling; Application health, so sync waves wait. |
 
 ### The release commit
@@ -69,8 +70,19 @@ Only the service that changed is rebuilt, retagged and rolled out: the pipelines
 | `automated` | Applies changes from Git without a manual sync. |
 | `prune: true` | Resources removed from Git are deleted from the cluster. |
 | `selfHeal: true` | Manual changes in the cluster (`kubectl scale`, `edit`, `delete`) are reverted to Git within about a minute (measured: a scale to 3 replicas was undone after 69 s; a deleted Deployment was recreated after 73 s). |
-| Sync waves | -1 namespace → 0 MongoDB, RabbitMQ → 1 backend services → 2 gateway, frontend. Each wave waits until the previous one is healthy. |
+| Sync waves | -2 AppProjects → -1 namespaces, Grafana dashboards → 0 MongoDB, RabbitMQ, monitoring and the metrics APIs → 1 backend services (with their autoscalers) → 2 gateway, frontend. Each wave waits until the previous one is healthy. |
 | Finalizers | Deleting an Application deletes what it deployed. |
+| Autoscaled replicas | Deployments with an autoscaler have no `replicas` in Git, so self-heal never resets the autoscaler's choice. |
+
+### Two AppProjects
+
+| Project | May deploy from | Into | Cluster-scoped kinds |
+|---|---|---|---|
+| `fraudguard` | this repository | `fraudguard` | Namespace |
+| `platform` | this repository and the three pinned chart repositories | `monitoring`, `kube-system` (metrics-server) | Namespace, ClusterRole, ClusterRoleBinding, APIService (the metrics APIs) |
+
+Upgrading a monitoring chart is a version change in `infra/argocd/apps/values.yaml`; CI renders the
+new version with the repository's values and validates it before the merge.
 
 ## Day-2 operations
 
