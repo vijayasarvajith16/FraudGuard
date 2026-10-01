@@ -73,10 +73,14 @@ review. If per-service enforcement is needed later, the usual pattern is a singl
 
 ## Container images (GHCR)
 
-After the first push to `main`, the images appear under the repository owner's *Packages*. GitHub
-creates them **private**; to let the Kubernetes cluster (Phase 10) or anyone else pull without a
-token, open each package → *Package settings* → *Change visibility* → *Public*. The image labels
-(`org.opencontainers.image.source`) link each package to this repository.
+The images appear under the repository owner's *Packages*. Because the image labels
+(`org.opencontainers.image.source`) link each package to this public repository, the packages are
+**public**: anyone, including the Kubernetes cluster (Phase 10), can pull without a token. (A fork
+in a private repository would get private packages; change that under *Package settings* →
+*Change visibility*.)
+
+Published so far (first push to `main`, commit `7dbf2bd`): all seven images, each tagged
+`sha-7dbf2bd9ed8758bb768eb3d1eb151171f1380ce4` and `1.0.0`.
 
 ```bash
 docker pull ghcr.io/<owner>/fraudguard-auth-service:sha-<commit>
