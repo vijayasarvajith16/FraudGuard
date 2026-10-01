@@ -2,7 +2,7 @@
 # .env by `make k8s-up` (never committed).
 image:
   repository: ghcr.io/vijayasarvajith16/fraudguard-auth-service
-  tag: sha-d7132699509832709a0d5d85add9d7809c26573b
+  tag: sha-01e3af83860c7b66a4eabf4daa99b7e19b443bfe
 
 port: 3001
 runAsUser: 1000 # the node image's "node" user
