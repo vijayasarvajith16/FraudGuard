@@ -1,0 +1,97 @@
+# Reusable pipeline for a Node package (the three Node services and the frontend):
+# lint -> unit tests with coverage -> dependency audit -> image build, Trivy gate, GHCR on main.
+name: node service
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Package directory, e.g. services/auth-service
+        required: true
+        type: string
+      image:
+        description: Image name without registry, e.g. fraudguard-auth-service
+        required: true
+        type: string
+      coverage-min:
+        description: Minimum line coverage (percent)
+        required: false
+        type: number
+        default: 75
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: lint, test, audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ${{ inputs.path }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ${{ inputs.path }}/package-lock.json
+
+      # The Node services share one mongodb-memory-server binary in .cache/ (their package.json config).
+      - name: Cache the MongoDB test binary
+        if: startsWith(inputs.path, 'services/')
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles(format('{0}/package-lock.json', inputs.path)) }}
+          restore-keys: mongodb-binaries-${{ runner.os }}-
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Lint and format check
+        run: npm run lint
+
+      - name: Unit tests with coverage
+        env:
+          MIN: ${{ inputs.coverage-min }}
+        run: |
+          if [ -f vite.config.js ]; then
+            npm run test:coverage -- --coverage.thresholds.lines="$MIN"
+          else
+            npm run test:coverage -- --coverageThreshold="{\"global\":{\"lines\":$MIN}}"
+          fi
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-${{ inputs.image }}
+          path: ${{ inputs.path }}/coverage/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Production dependencies only: dev tooling never ships in the image.
+      - name: Dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+  image:
+    needs: verify
+    uses: ./.github/workflows/_container-image.yml
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    with:
+      context: ${{ inputs.path }}
+      image: ${{ inputs.image }}
+      version: ${{ needs.verify.outputs.version }}

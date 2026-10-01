@@ -1,0 +1,63 @@
+# System tests on every pull request to main: builds the whole compose stack from the PR, then runs
+# the end-to-end suite, the gateway black-box tests and the queue integration tests (docs/testing.md).
+name: e2e
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore: ["**/*.md", "docs/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compose:
+    name: compose stack
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # Fresh secrets per run; the scan services read the public model registry anonymously.
+      - name: Generate .env
+        run: make env
+
+      - name: End-to-end suite (builds and starts the stack)
+        run: make e2e
+
+      - name: Gateway black-box tests
+        run: make gateway-test
+
+      - name: Queue integration tests
+        run: make test-integration
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker compose logs --no-color --timestamps > compose-logs.txt
+
+      - name: Upload logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: compose-logs
+          path: compose-logs.txt
+          retention-days: 7
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v --remove-orphans

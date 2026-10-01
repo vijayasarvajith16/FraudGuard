@@ -1,0 +1,38 @@
+# transaction-service pipeline. Runs only when this service or the shared pipeline it uses changes (docs/ci.md).
+name: transaction-service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - services/transaction-service/**
+      - .github/workflows/transaction-service.yml
+      - .github/workflows/_node-service.yml
+      - .github/workflows/_container-image.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - services/transaction-service/**
+      - .github/workflows/transaction-service.yml
+      - .github/workflows/_node-service.yml
+      - .github/workflows/_container-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Named after the service so its checks are unique (branch protection matches check names).
+  transaction-service:
+    uses: ./.github/workflows/_node-service.yml
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    with:
+      path: services/transaction-service
+      image: fraudguard-transaction-service

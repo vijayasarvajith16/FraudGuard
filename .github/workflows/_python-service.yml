@@ -1,0 +1,93 @@
+# Reusable pipeline for a Python service (quick-scan, deep-scan):
+# lint -> unit tests with coverage -> dependency audit -> image build, Trivy gate, GHCR on main.
+name: python service
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: Service directory, e.g. services/quick-scan-service
+        required: true
+        type: string
+      image:
+        description: Image name without registry, e.g. fraudguard-quick-scan-service
+        required: true
+        type: string
+      python-version:
+        description: Same as the service image and the Colab training runtime
+        required: false
+        type: string
+        default: "3.13"
+      coverage-min:
+        description: Minimum line coverage (percent)
+        required: false
+        type: number
+        default: 75
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: lint, test, audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ${{ inputs.path }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: pip
+          cache-dependency-path: ${{ inputs.path }}/requirements*.txt
+
+      - name: Install
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-dev.txt
+          python -m pip install --disable-pip-version-check pip-audit==2.10.1
+
+      - name: Lint and format check
+        run: |
+          ruff check .
+          ruff format --check .
+
+      - name: Unit tests with coverage
+        run: >
+          python -m pytest --cov=app --cov-report=term --cov-report=xml:coverage/coverage.xml
+          --cov-fail-under=${{ inputs.coverage-min }}
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-${{ inputs.image }}
+          path: ${{ inputs.path }}/coverage/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      # Runtime requirements only (what ships in the image), resolved with their transitive deps.
+      - name: Dependency audit
+        run: pip-audit --progress-spinner off -r requirements.txt
+
+      - name: Version
+        id: version
+        run: echo "version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")" >> "$GITHUB_OUTPUT"
+
+  image:
+    needs: verify
+    uses: ./.github/workflows/_container-image.yml
+    permissions:
+      contents: read
+      packages: write
+      security-events: write
+    with:
+      context: ${{ inputs.path }}
+      image: ${{ inputs.image }}
+      version: ${{ needs.verify.outputs.version }}

@@ -18,6 +18,11 @@ export default defineConfig(({ mode }) => {
       include: ['tests/**/*.test.{js,jsx}'],
       restoreMocks: true,
       unstubGlobals: true,
+      coverage: {
+        provider: 'v8',
+        include: ['src/**/*.{js,jsx}'],
+        reporter: ['text-summary', 'lcov'],
+      },
     },
   };
 });

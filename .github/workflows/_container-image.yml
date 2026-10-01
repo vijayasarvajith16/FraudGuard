@@ -1,0 +1,124 @@
+# Reusable: build a service image, gate it on Trivy, and on pushes to main publish it to GHCR.
+# Called by _node-service.yml, _python-service.yml and api-gateway.yml (docs/ci.md).
+name: container image
+
+on:
+  workflow_call:
+    inputs:
+      context:
+        description: Build context (the service directory)
+        required: true
+        type: string
+      image:
+        description: Image name without registry, e.g. fraudguard-auth-service
+        required: true
+        type: string
+      version:
+        description: Semver of the service (from its manifest)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.74.0
+  # mirror.gcr.io first: ghcr.io rate-limits anonymous vulnerability-DB downloads.
+  TRIVY_DB: mirror.gcr.io/aquasec/trivy-db:2,ghcr.io/aquasecurity/trivy-db:2
+
+jobs:
+  image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # push to GHCR (main only)
+      security-events: write # upload the Trivy SARIF to code scanning
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Image name
+        id: name
+        # GHCR repository names must be lowercase. Inputs reach the shell only through env, never
+        # by template expansion inside the script.
+        env:
+          IMAGE: ${{ inputs.image }}
+        run: |
+          [[ "$IMAGE" =~ ^[a-z0-9][a-z0-9._-]*$ ]] || { echo "invalid image name: $IMAGE"; exit 1; }
+          echo "ref=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${IMAGE}" >> "$GITHUB_OUTPUT"
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.name.outputs.ref }}
+          # sha-<full sha>: immutable, what deployments pin. <semver>: the latest build of that version.
+          tags: |
+            type=sha,format=long
+            type=raw,value=${{ inputs.version }}
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          load: true # into the runner's Docker, so it is scanned before anything is pushed
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ inputs.image }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.image }}
+
+      - name: Cache the Trivy vulnerability DB
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/trivy
+          key: trivy-db-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: trivy-db-${{ runner.os }}-
+
+      - name: Trivy scan (fails on fixable HIGH/CRITICAL)
+        env:
+          IMAGE: ${{ steps.name.outputs.ref }}:sha-${{ github.sha }}
+        run: |
+          trivy() {
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$RUNNER_TEMP/trivy:/root/.cache/trivy" -v "$PWD:/out" \
+              "$TRIVY_IMAGE" image --db-repository "$TRIVY_DB" --scanners vuln \
+              --severity HIGH,CRITICAL --ignore-unfixed "$@" "$IMAGE"
+          }
+          # Report everything to code scanning first, then gate (a failure must not hide the report).
+          trivy --format sarif --output /out/trivy.sarif --exit-code 0
+          trivy --format table --exit-code 1
+
+      - name: Upload Trivy results to code scanning
+        if: always() && hashFiles('trivy.sarif') != ''
+        uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-${{ inputs.image }}
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          REF: ${{ steps.name.outputs.ref }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          docker push --all-tags "$REF"
+          {
+            echo "### Published ${REF}"
+            echo
+            echo '```'
+            echo "$TAGS"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
