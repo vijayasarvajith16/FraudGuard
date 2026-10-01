@@ -53,11 +53,14 @@ configFilesMountPath: /app/config
 
 probes:
   # Contract §0.6: /health/live = process up (liveness), /health = dependencies ready (readiness).
+  # Liveness only has to catch a hung process, and a restart under load sheds nothing (the restarted
+  # pod gets the same traffic): a saturated but working event loop gets 60 s (load test,
+  # docs/performance.md). Readiness reacts within 30 s and takes the pod out of the Service meanwhile.
   liveness:
     path: /health/live
     periodSeconds: 15
-    timeoutSeconds: 3
-    failureThreshold: 3
+    timeoutSeconds: 5
+    failureThreshold: 4
   readiness:
     path: /health
     periodSeconds: 10

@@ -17,4 +17,6 @@ persistence:
 
 resources:
   requests: { cpu: 100m, memory: 256Mi }
-  limits: { cpu: "1", memory: 512Mi }
+  # mongod reached ~330 MiB under the load test (cache plus a connection pool per service replica),
+  # and every exec probe starts a mongosh of its own (~100+ MiB): 512Mi left too little headroom.
+  limits: { cpu: "1", memory: 768Mi }

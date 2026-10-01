@@ -27,6 +27,36 @@ env:
   MONGO_URI: "mongodb://transaction_service:$(MONGO_TRANSACTIONS_PASSWORD)@mongodb:27017/fraudguard_transactions?authSource=fraudguard_transactions&replicaSet=rs0"
   RABBITMQ_URL: "amqp://$(RABBITMQ_DEFAULT_USER):$(RABBITMQ_DEFAULT_PASS)@rabbitmq:5672"
 
+# The load test (docs/performance.md) measured ~30 ms of CPU per transfer: one pod tops out at about
+# one core (a Node.js process), and with the former 500m limit it saturated near 16 transfers/s.
 resources:
-  requests: { cpu: 50m, memory: 96Mi }
-  limits: { cpu: 500m, memory: 256Mi }
+  requests: { cpu: 250m, memory: 96Mi }
+  limits: { cpu: "1", memory: 256Mi }
+
+# Scales on CPU: every transfer runs here synchronously (validation, two MongoDB transactions, the
+# quick-scan call), so CPU tracks load. Replicas are safe: concurrent outbox relays race on guarded
+# state transitions, and consumers deduplicate republished events (contract §3.5).
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60 # of the 250m request
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
