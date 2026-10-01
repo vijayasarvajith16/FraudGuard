@@ -11,6 +11,8 @@ from a clean clone with `make`.
 | Gateway black box | `make gateway-test` | running stack | Routing, the deny list (scan services and `/internal` unreachable), CORS, rate limits, error envelopes, frontend headers. |
 | End to end | `make e2e` | Docker | The whole system through the gateway only, as a client sees it (below). Builds and starts the stack itself. |
 | ML sanity | `make ml-test` | Python | The training pipeline on synthetic data (real training runs in Colab). |
+| Monitoring as code | `make test-monitoring` | Docker | promtool unit tests for every alert rule (firing and quiet cases), and every dashboard query parses (docs/monitoring.md). |
+| Load | `make load-test` | the kind cluster | k6 through the ingress and gateway inside the cluster: p50/p95/p99, errors and the autoscalers' reactions per load step (docs/performance.md). |
 
 ## The end-to-end suite (`tests/e2e/`)
 

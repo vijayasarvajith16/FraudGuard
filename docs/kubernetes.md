@@ -28,6 +28,9 @@ Kubernetes.kubectl Helm.Helm ezwinports.make`), and a `.env` (`make env`).
 | `make k8s-up K8S_LOCAL_IMAGES=1` | Without Argo CD: builds the images locally (`docker compose build`), loads them into kind and deploys with Helm directly. Use it to test changes CI has not published yet; on a cluster Argo CD already manages, run `make k8s-down` first (self-heal would revert local images). |
 | `make k8s-status` | Argo CD applications, pods, ingress and the node's memory use. |
 | `make k8s-argocd` | Argo CD UI via port-forward (https://localhost:8443, user `admin`; prints the password). |
+| `make k8s-grafana` | Grafana's URL (http://localhost:8089/grafana/, dashboards need no login) and its `admin` password. |
+| `make k8s-prometheus` | Prometheus UI via port-forward (http://localhost:9090). |
+| `make load-test` | k6 load test inside the cluster (`PROFILE=ramp\|backlog\|smoke`, `LOAD_PODS=8`); needs `make load-rows` once. Results: docs/performance.md. |
 | `make k8s-stop` / `make k8s-start` | Stops / resumes the node container. All state is kept; pods are ready again about a minute after a start. |
 | `make k8s-down` | Deletes the cluster and all its data (the Secret, the databases). |
 
@@ -42,13 +45,18 @@ context, so it never touches another cluster in your kubeconfig.
 | `traefik` (namespace `traefik`) | `traefik/traefik` 41.6.1 | Ingress controller, `hostPort: 80` on the node, mapped to the host by kind. Chosen over ingress-nginx, which the Kubernetes project retired in March 2026. |
 | `mongodb` | `infra/helm/mongodb` | StatefulSet, `mongo:7.0`, single-node replica set with keyfile auth; per-service users created on first start. Same scripts as docker compose (`infra/helm/mongodb/files/`). |
 | `rabbitmq` | `infra/helm/rabbitmq` | StatefulSet, `rabbitmq:3.13-management-alpine`; the services declare the topology. |
-| 7 services | `infra/helm/service` (shared) | One release per service, named after it, configured by `infra/helm/values/values-<service>.yaml`. |
+| 7 services | `infra/helm/service` (shared) | One release per service, named after it, configured by `infra/helm/values/values-<service>.yaml`. quick-scan and deep-scan have autoscalers. |
+| Monitoring (namespaces `monitoring`, `kube-system`) | Prometheus, Grafana, prometheus-adapter, metrics-server (pinned upstream charts) | Dashboards, alert rules and the metrics APIs the autoscalers read: docs/monitoring.md. |
 
 The shared chart renders a Deployment, a Service (same port as compose, so in-cluster URLs are
 unchanged: `http://auth-service:3001`), a ConfigMap for plain settings, Secret references for
 credentials, optional mounted config files, and an Ingress where enabled (`/` frontend, `/api`
 gateway). Probes follow contract §0.6: liveness `/health/live`, readiness `/health`; the scan
-services add a startup probe that allows 3 minutes for the model download.
+services add a startup probe that allows 3 minutes for the model download. Liveness tolerates 60 s
+without an answer: under load a saturated pod answers late, and restarting it only made it crash-loop
+(docs/performance.md); readiness takes it out of the Service within 30 s instead. Pods carry
+`prometheus.io/*` annotations for scraping; optional `sidecars` (the gateway's nginx exporter) and an
+optional HorizontalPodAutoscaler, in which case the Deployment leaves `replicas` to it.
 
 ### Image tags
 
@@ -86,19 +94,22 @@ updates the file in place and the service's 10-second poll loads it, with no res
 
 ## Resources
 
-Requests and limits per pod, sized from measured usage under compose:
+Requests and limits per pod, sized from measured usage under compose and adjusted by the load test
+(docs/performance.md):
 
-| Pod | CPU request / limit | Memory request / limit | Profile |
-|---|---|---|---|
-| quick-scan-service | 250m / 1 | 256Mi / 320Mi | Low latency, small: reserves real CPU because it sits on the transfer's 300 ms hot path; memory stays tight (~180 MiB measured). |
-| deep-scan-service | 100m / 1 | 256Mi / 512Mi | Bigger, throughput: an asynchronous queue consumer, so little reserved CPU but more memory headroom for the booster and prefetch. |
-| auth, transaction, alerting (each) | 50m / 500m | 96Mi / 256Mi | Node services (~45 MiB measured). |
-| api-gateway | 50m / 500m | 32Mi / 64Mi | nginx. |
-| frontend | 10m / 200m | 16Mi / 32Mi | Static files. |
-| mongodb | 100m / 1 | 256Mi / 512Mi | WiredTiger cache capped at 0.25 GB. |
-| rabbitmq | 100m / 1 | 256Mi / 512Mi | High-watermark derived from the limit. |
-| traefik | 50m / 500m | 48Mi / 128Mi | |
-| **Total** | **810m** requested | **1.4 GiB** requested / **2.8 GiB** limit | |
+| Pod | CPU request / limit | Memory request / limit | Replicas | Profile |
+|---|---|---|---|---|
+| transaction-service | 250m / 1 | 96Mi / 256Mi | 1–4 (CPU) | Every transfer runs here synchronously, ~30 ms of CPU each: a pod may use a full core (one Node.js process). |
+| quick-scan-service | 250m / 1 | 256Mi / 320Mi | 1–4 (CPU) | Low latency, small: reserves real CPU because it sits on the transfer's 300 ms hot path; memory stays tight (~180 MiB measured). |
+| deep-scan-service | 100m / 1 | 256Mi / 512Mi | 1–3 (queue depth) | Bigger, throughput: an asynchronous queue consumer, so little reserved CPU but more memory headroom for the booster and prefetch. |
+| auth, alerting (each) | 50m / 500m | 96Mi / 256Mi | 1 | Node services (~45 MiB measured). |
+| api-gateway | 60m / 600m | 48Mi / 96Mi | 1 | nginx plus the nginx-prometheus-exporter sidecar. |
+| frontend | 10m / 200m | 16Mi / 32Mi | 1 | Static files. |
+| mongodb | 100m / 1 | 256Mi / 768Mi | 1 | WiredTiger cache capped at 0.25 GB; ~330 MiB under load plus a `mongosh` per exec probe. Its one core is the end-to-end bottleneck. |
+| rabbitmq | 100m / 1 | 256Mi / 512Mi | 1 | High-watermark derived from the limit. |
+| traefik | 50m / 500m | 48Mi / 128Mi | 1 | |
+| Monitoring: Prometheus, Grafana (+ sidecar), kube-state-metrics, prometheus-adapter, metrics-server | 210m in total | 784Mi requested / 2 GiB limit | 1 each | docs/monitoring.md. |
+| **Total, one replica each** | **1.23 cores** requested | **2.2 GiB** requested / **5.1 GiB** limit | | |
 
 ## Memory footprint and how to stop it
 
@@ -112,9 +123,11 @@ Measured on the running cluster (kubelet summary API, working set, after replay 
 | Traefik | 21 MiB |
 | **Whole kind node** (all pods + kubelet, containerd, image cache) | **2.4 GiB** (`docker stats`) |
 | With Argo CD (GitOps, Phase 12): application controller 126, repo server 35, server 23, Redis 5 (Dex, notifications and ApplicationSets scaled to 0) | +190 MiB; **node 3.1 GiB** |
+| With monitoring (Phase 13): Grafana 322 (with its dashboard sidecar), Prometheus 181, metrics-server 32, kube-state-metrics 27, prometheus-adapter 25 | +590 MiB; **node 4.1 GiB** after the load tests (MongoDB keeps more in memory) |
 
 The application uses about 0.75 GiB, as it does under docker compose; Kubernetes adds roughly
-1.6 GiB and Argo CD about 0.2 GiB. On a 16 GB machine with Docker Desktop's default 8 GB VM, the
+1.6 GiB, Argo CD about 0.2 GiB and monitoring about 0.6 GiB. A load test adds the autoscaled pods
+(up to 3 more of each scan service and transaction-service) and the k6 pods. On a 16 GB machine with Docker Desktop's default 8 GB VM, the
 cluster and the compose stack fit side by side.
 
 To free the memory: `make k8s-stop` (keeps everything; `make k8s-start` resumes) or `make k8s-down`
