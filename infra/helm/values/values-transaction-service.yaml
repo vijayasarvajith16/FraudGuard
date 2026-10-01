@@ -1,7 +1,7 @@
 # transaction-service (docs/contracts.md §2): wallets, transfers, the scan cascade, the outbox relay.
 image:
   repository: ghcr.io/vijayasarvajith16/fraudguard-transaction-service
-  tag: sha-7dbf2bd9ed8758bb768eb3d1eb151171f1380ce4
+  tag: sha-01e3af83860c7b66a4eabf4daa99b7e19b443bfe
 
 port: 3002
 runAsUser: 1000
