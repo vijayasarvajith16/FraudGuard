@@ -1,0 +1,16 @@
+# Optional remote state in OCI Object Storage (Terraform's native "oci" backend, 1.12+).
+# Without this file, state is local (infra/terraform/terraform.tfstate, gitignored): fine for a
+# one-person demo, but it holds resource IDs and must not be lost or committed.
+#
+# To switch (docs/terraform.md):
+#   1. Create a private bucket, e.g. fraudguard-tfstate (Object Storage is included in Always Free).
+#   2. cp backend.tf.example backend.tf
+#   3. terraform init -migrate-state \
+#        -backend-config="bucket=fraudguard-tfstate" -backend-config="namespace=<object storage namespace>"
+# Authentication reuses the provider's ~/.oci/config profile.
+terraform {
+  backend "oci" {
+    key                 = "fraudguard/terraform.tfstate"
+    config_file_profile = "DEFAULT"
+  }
+}
