@@ -1,0 +1,111 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/part-of: fraudguard
+spec:
+  serviceName: {{ .Release.Name }}-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ .Release.Name }}
+        app.kubernetes.io/part-of: fraudguard
+      annotations:
+        checksum/scripts: {{ printf "%s%s" (.Files.Get "files/entrypoint.sh") (.Files.Get "files/healthcheck.js") | sha256sum }}
+    spec:
+      automountServiceAccountToken: false
+      # The official image starts as root to prepare the data directory and keyfile, then drops to
+      # the mongodb user (uid 999) itself; hence the namespace's "baseline" Pod Security level.
+      securityContext:
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mongodb
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [bash, /fraudguard/entrypoint.sh]
+          args:
+            - mongod
+            - --replSet
+            - rs0
+            - --keyFile
+            - /tmp/mongo-keyfile
+            - --bind_ip_all
+            - --wiredTigerCacheSizeGB
+            - {{ .Values.wiredTigerCacheSizeGB | quote }}
+            - --quiet
+          ports:
+            - name: mongodb
+              containerPort: 27017
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: MONGO_ROOT_USERNAME } }
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: MONGO_ROOT_PASSWORD } }
+            - name: MONGO_AUTH_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: MONGO_AUTH_PASSWORD } }
+            - name: MONGO_TRANSACTIONS_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: MONGO_TRANSACTIONS_PASSWORD } }
+            - name: MONGO_ALERTS_PASSWORD
+              valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: MONGO_ALERTS_PASSWORD } }
+            - name: POD_NAME
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            # The member address clients use after discovering the set (see services.yaml).
+            - name: MONGO_RS_HOST
+              value: "$(POD_NAME).{{ .Release.Name }}-headless.{{ .Release.Namespace }}.svc.cluster.local:27017"
+          # Initiates the replica set on first start; ready once this node is a writable primary.
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -c
+                - mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin /fraudguard/healthcheck.js
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 15
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command: [mongosh, --quiet, --eval, "db.adminCommand('ping').ok"]
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 15
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+            - name: scripts
+              mountPath: /fraudguard
+              readOnly: true
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+      volumes:
+        - name: scripts
+          configMap:
+            name: {{ .Release.Name }}-scripts
+        - name: init
+          configMap:
+            name: {{ .Release.Name }}-init
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.persistence.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}

@@ -1,0 +1,16 @@
+image:
+  repository: rabbitmq
+  tag: 3.13-management-alpine # same as docker compose
+  pullPolicy: IfNotPresent
+
+# Secret with RABBITMQ_DEFAULT_USER and RABBITMQ_DEFAULT_PASS (created from .env by `make k8s-up`).
+existingSecret: fraudguard-secrets
+
+persistence:
+  size: 1Gi
+  storageClass: ""
+
+# RabbitMQ sizes its memory high-watermark (0.4) from the cgroup limit.
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: "1", memory: 512Mi }

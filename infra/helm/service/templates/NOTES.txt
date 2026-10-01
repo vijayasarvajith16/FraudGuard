@@ -1,0 +1,5 @@
+{{ include "svc.name" . }} ({{ include "svc.image" . }}) deployed to namespace {{ .Release.Namespace }}.
+In-cluster URL: http://{{ include "svc.name" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.port }}
+{{- if .Values.ingress.enabled }}
+Ingress paths: {{ join ", " .Values.ingress.paths }}
+{{- end }}

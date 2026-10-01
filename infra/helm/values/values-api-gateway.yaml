@@ -1,0 +1,33 @@
+# api-gateway (docs/contracts.md §8). The ingress routes /api to it; it routes to the services.
+image:
+  repository: ghcr.io/vijayasarvajith16/fraudguard-api-gateway
+  # The first image with NGINX_SERVICE_DOMAIN / NGINX_TRUSTED_PROXIES support is built when this
+  # change reaches main; bump this tag to that sha (Phase 12 automates the bump).
+  tag: sha-7dbf2bd9ed8758bb768eb3d1eb151171f1380ce4
+
+port: 8080
+runAsUser: 101 # nginx-unprivileged
+
+config:
+  # nginx's resolver has no search list: names must be fully qualified (§8).
+  NGINX_RESOLVER: kube-dns.kube-system.svc.cluster.local
+  NGINX_SERVICE_DOMAIN: ".{{ .Release.Namespace }}.svc.cluster.local"
+  # kind's pod network: the ingress controller's X-Forwarded-For is trusted, so rate limits key on
+  # the real client, not on the ingress pod (§8).
+  NGINX_TRUSTED_PROXIES: "10.244.0.0/16"
+  CORS_ALLOWED_ORIGINS: "http://localhost:8089 http://localhost:5173"
+
+probes:
+  liveness: { path: /health, periodSeconds: 15, timeoutSeconds: 3, failureThreshold: 3 }
+  readiness: { path: /health, periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 3 }
+
+# The entrypoint renders templates into conf.d at startup; nginx writes pid and temp files to /tmp.
+writablePaths: [/tmp, /etc/nginx/conf.d]
+
+ingress:
+  enabled: true
+  paths: [/api]
+
+resources:
+  requests: { cpu: 50m, memory: 32Mi }
+  limits: { cpu: 500m, memory: 64Mi }

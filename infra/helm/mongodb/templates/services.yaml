@@ -1,0 +1,35 @@
+# Clients connect to "mongodb:27017" (the same name as in docker compose).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/part-of: fraudguard
+spec:
+  selector:
+    app.kubernetes.io/name: {{ .Release.Name }}
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: mongodb
+---
+# Headless service: gives the pod a stable DNS name that resolves before it is ready. The replica
+# set registers itself under that name (a plain Service has no endpoints until the pod is ready,
+# which would deadlock rs.initiate), and drivers connect to it after discovering the set.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-headless
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/part-of: fraudguard
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/name: {{ .Release.Name }}
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: mongodb

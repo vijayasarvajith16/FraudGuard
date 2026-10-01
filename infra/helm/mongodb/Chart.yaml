@@ -1,0 +1,9 @@
+apiVersion: v2
+name: fraudguard-mongodb
+description: >-
+  Single-node MongoDB replica set (rs0) for FraudGuard: multi-document transactions, keyfile auth,
+  and one least-privilege user per service. Lightweight by design (one replica, small cache); the
+  scripts in files/ are shared with docker compose.
+type: application
+version: 0.1.0
+appVersion: "7.0"

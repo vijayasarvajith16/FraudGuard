@@ -1,0 +1,25 @@
+# frontend (docs/contracts.md §8.1): the React SPA. The ingress routes / to it and /api to the
+# gateway, so the browser sees one origin and the SPA calls /api (VITE_API_BASE_URL default).
+image:
+  repository: ghcr.io/vijayasarvajith16/fraudguard-frontend
+  tag: sha-7dbf2bd9ed8758bb768eb3d1eb151171f1380ce4
+
+port: 8081
+runAsUser: 101
+
+config:
+  NGINX_CSP_CONNECT_SRC: "'self'"
+
+probes:
+  liveness: { path: /health, periodSeconds: 15, timeoutSeconds: 3, failureThreshold: 3 }
+  readiness: { path: /health, periodSeconds: 10, timeoutSeconds: 3, failureThreshold: 3 }
+
+writablePaths: [/tmp, /etc/nginx/conf.d]
+
+ingress:
+  enabled: true
+  paths: [/]
+
+resources:
+  requests: { cpu: 10m, memory: 16Mi }
+  limits: { cpu: 200m, memory: 32Mi }

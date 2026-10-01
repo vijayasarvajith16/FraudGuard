@@ -1,0 +1,76 @@
+# Defaults for the shared service chart. Each service overrides these in
+# infra/helm/values/values-<service>.yaml; the release name is the service name.
+
+image:
+  # Required. CI publishes ghcr.io/<owner>/fraudguard-<service> (docs/ci.md).
+  repository: ""
+  # Required. An immutable sha-<commit> tag; CI bumps it (Phase 12).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+# Container port; the Service exposes the same port, so in-cluster URLs match compose
+# (e.g. http://auth-service:3001).
+port: 8080
+
+# Non-secret settings, rendered into a ConfigMap and loaded with envFrom. Values go through
+# `tpl`, so they may use {{ .Release.Namespace }}. A change rolls the pods (checksum annotation).
+config: {}
+
+# Environment from Secrets, defined before `env` so `env` can reference them as $(NAME).
+#   NAME: { secret: <secret name>, key: <key>, optional: false }
+secretEnv: {}
+
+# Values composed from secrets, e.g. MONGO_URI: "mongodb://user:$(MONGO_PASSWORD)@mongodb:27017/db".
+# Kubernetes expands $(NAME) only in env values (not envFrom), hence the separate map.
+env: {}
+
+# Files mounted from a ConfigMap at configFilesMountPath. Deliberately NOT in the checksum: the
+# kubelet updates the mounted files in place, so a service that watches its file (alerting-service
+# polls tierActions.json) picks up a change without a restart.
+configFiles: {}
+configFilesMountPath: /app/config
+
+probes:
+  # Contract §0.6: /health/live = process up (liveness), /health = dependencies ready (readiness).
+  liveness:
+    path: /health/live
+    periodSeconds: 15
+    timeoutSeconds: 3
+    failureThreshold: 3
+  readiness:
+    path: /health
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 3
+  # Optional: gives slow starters (model download) time before liveness applies.
+  startup: null
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 128Mi
+
+# Numeric UID of the image's non-root user (runAsNonRoot cannot verify a named user).
+runAsUser: 10001
+
+# The root filesystem is read-only; these paths get an emptyDir each.
+writablePaths:
+  - /tmp
+writableSizeLimit: 64Mi
+
+ingress:
+  enabled: false
+  className: traefik
+  # Prefix paths routed to this service, e.g. [/api].
+  paths: []
+
+terminationGracePeriodSeconds: 30
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

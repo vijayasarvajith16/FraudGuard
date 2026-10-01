@@ -1,0 +1,20 @@
+image:
+  repository: mongo
+  tag: "7.0" # same as docker compose
+  pullPolicy: IfNotPresent
+
+# Secret with MONGO_ROOT_USERNAME, MONGO_ROOT_PASSWORD and the per-service passwords
+# (MONGO_AUTH_PASSWORD, MONGO_TRANSACTIONS_PASSWORD, MONGO_ALERTS_PASSWORD). Created from .env by
+# `make k8s-up`; never committed.
+existingSecret: fraudguard-secrets
+
+# WiredTiger cache: the default (half of RAM) would exceed the container limit.
+wiredTigerCacheSizeGB: "0.25"
+
+persistence:
+  size: 1Gi
+  storageClass: "" # cluster default (kind: local-path)
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: "1", memory: 512Mi }

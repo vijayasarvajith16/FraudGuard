@@ -1,0 +1,32 @@
+# transaction-service (docs/contracts.md §2): wallets, transfers, the scan cascade, the outbox relay.
+image:
+  repository: ghcr.io/vijayasarvajith16/fraudguard-transaction-service
+  tag: sha-7dbf2bd9ed8758bb768eb3d1eb151171f1380ce4
+
+port: 3002
+runAsUser: 1000
+
+config:
+  NODE_ENV: production
+  PORT: "3002"
+  LOG_LEVEL: info
+  TRUST_PROXY: "1"
+  MONGO_DB: fraudguard_transactions
+  AUTH_SERVICE_URL: http://auth-service:3001
+  QUICK_SCAN_URL: http://quick-scan-service:8001
+  QUICK_SCAN_TIMEOUT_MS: "300"
+
+secretEnv:
+  MONGO_TRANSACTIONS_PASSWORD: { secret: fraudguard-secrets, key: MONGO_TRANSACTIONS_PASSWORD }
+  RABBITMQ_DEFAULT_USER: { secret: fraudguard-secrets, key: RABBITMQ_DEFAULT_USER }
+  RABBITMQ_DEFAULT_PASS: { secret: fraudguard-secrets, key: RABBITMQ_DEFAULT_PASS }
+  JWT_SECRET: { secret: fraudguard-secrets, key: JWT_SECRET }
+  INTERNAL_SERVICE_TOKEN: { secret: fraudguard-secrets, key: INTERNAL_SERVICE_TOKEN }
+
+env:
+  MONGO_URI: "mongodb://transaction_service:$(MONGO_TRANSACTIONS_PASSWORD)@mongodb:27017/fraudguard_transactions?authSource=fraudguard_transactions&replicaSet=rs0"
+  RABBITMQ_URL: "amqp://$(RABBITMQ_DEFAULT_USER):$(RABBITMQ_DEFAULT_PASS)@rabbitmq:5672"
+
+resources:
+  requests: { cpu: 50m, memory: 96Mi }
+  limits: { cpu: 500m, memory: 256Mi }

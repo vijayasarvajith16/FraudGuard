@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-scripts
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/part-of: fraudguard
+data:
+  entrypoint.sh: |
+    {{- .Files.Get "files/entrypoint.sh" | nindent 4 }}
+  healthcheck.js: |
+    {{- .Files.Get "files/healthcheck.js" | nindent 4 }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-init
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    app.kubernetes.io/part-of: fraudguard
+data:
+  {{- (.Files.Glob "files/init/*.js").AsConfig | nindent 2 }}

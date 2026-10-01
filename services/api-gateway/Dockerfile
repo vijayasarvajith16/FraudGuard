@@ -4,14 +4,18 @@
 # /etc/nginx/templates/*.template with envsubst and runs /docker-entrypoint.d/*.sh at startup.
 FROM nginxinc/nginx-unprivileged:1.30.5-alpine
 
+# Defaults suit docker compose; Kubernetes overrides the resolver, the service domain and the
+# trusted proxies (docs/contracts.md §8). Defined even when empty: envsubst only replaces set variables.
 ENV NGINX_RESOLVER=127.0.0.11 \
+    NGINX_SERVICE_DOMAIN="" \
+    NGINX_TRUSTED_PROXIES="" \
     CORS_ALLOWED_ORIGINS="" \
     NGINX_ENVSUBST_FILTER="^NGINX_"
 
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY snippets/ /etc/nginx/snippets/
 COPY templates/ /etc/nginx/templates/
-COPY --chmod=0755 docker-entrypoint.d/20-cors-origins.sh /docker-entrypoint.d/20-cors-origins.sh
+COPY --chmod=0755 docker-entrypoint.d/20-cors-origins.sh docker-entrypoint.d/25-trusted-proxies.sh /docker-entrypoint.d/
 
 EXPOSE 8080
 

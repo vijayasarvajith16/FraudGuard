@@ -1,6 +1,6 @@
 # FraudGuard Service Contracts
 
-**Status:** authoritative. Contract version `1.5.0`.
+**Status:** authoritative. Contract version `1.6.0`.
 Change this file first, then the code. Any change that breaks a consumer bumps the major version and the message `version` field.
 
 This document defines every HTTP API, the transaction data model, the RabbitMQ topology, the risk policy, and failure behaviour. If code and this file disagree, the code is wrong.
@@ -553,6 +553,8 @@ Metrics: `alerts_created_total{tier,action}`, `otp_verifications_total{result="s
 - Upstream timeouts: connect 2 s, read 10 s. Max body 100 kB.
 - JSON access log including the request ID, upstream time and status.
 - Errors produced by the gateway itself (`404` unknown route, `413`, `429`, `502`/`503`/`504` upstream failures) use the §0.5 envelope, with `requestId`.
+- **Client IP behind another proxy:** rate limits and access logs key on the client address. When the gateway sits behind an ingress (Kubernetes), `NGINX_TRUSTED_PROXIES` lists the proxy CIDRs whose `X-Forwarded-For` is believed (`real_ip_recursive`). Empty (compose) means the TCP peer is the client, and a client-supplied `X-Forwarded-For` is ignored. Without it every user behind the ingress would share one rate-limit bucket.
+- **Upstream names:** services are addressed as `<service><NGINX_SERVICE_DOMAIN>`. Nginx's resolver does not apply the resolv.conf search list, so Kubernetes sets the domain (`.fraudguard.svc.cluster.local`); compose leaves it empty. Upstreams re-resolve at runtime (`resolve`), so a redeployed service is followed to its new address.
 - Runs as a non-root user on port **8080**. `stub_status` is served only on the internal port **8090** (`/nginx_status`) for the Prometheus exporter; it is not published.
 - Security headers on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`. `server_tokens off`.
 
@@ -627,10 +629,11 @@ Every service reads configuration only from the environment and ships a `.env.ex
 | quick-scan | `MLFLOW_TRACKING_URI`, `MLFLOW_TRACKING_USERNAME`, `MLFLOW_TRACKING_PASSWORD`, `MODEL_URI=models:/fraudguard-quick-scan@production`, `ALLOW_LOCAL_MODEL_FALLBACK=false`, `LOCAL_MODEL_PATH`, `QUICK_SCAN_THRESHOLD` (optional override) |
 | deep-scan | the MLflow variables above, `MODEL_URI=models:/fraudguard-deep-scan@production`, `ALLOW_LOCAL_MODEL_FALLBACK=false`, `LOCAL_MODEL_PATH`, `RABBITMQ_URL`, `TIER_MEDIUM_MIN=0.30`, `TIER_HIGH_MIN=0.70`, `TIER_CRITICAL_MIN=0.90`, `MAX_RETRIES=3`, `PREFETCH=10` |
 | alerting | `MONGO_URI`, `MONGO_DB=fraudguard_alerts`, `RABBITMQ_URL`, `JWT_SECRET`, `INTERNAL_SERVICE_TOKEN`, `TRANSACTION_SERVICE_URL`, `TIER_ACTIONS_PATH`, `TIER_ACTIONS_POLL_SECONDS=30`, `OTP_TTL_SECONDS=300`, `OTP_MAX_ATTEMPTS=3`, `EXPOSE_SIMULATED_OTP=false`, `MAX_RETRIES=3`, `PREFETCH=10`, `OTP_SECRET` (≥ 32 chars), `OTP_SWEEP_INTERVAL_SECONDS=60`, `TRANSACTION_SERVICE_TIMEOUT_MS=3000` |
-| gateway | `CORS_ALLOWED_ORIGINS` (space-separated exact origins), `NGINX_RESOLVER` (DNS for lazily-resolved upstreams; `127.0.0.11` in Docker) |
+| gateway | `CORS_ALLOWED_ORIGINS` (space-separated exact origins), `NGINX_RESOLVER` (DNS server for upstream re-resolution; `127.0.0.11` in Docker, kube-dns in Kubernetes), `NGINX_SERVICE_DOMAIN` (suffix for upstream names; empty in compose), `NGINX_TRUSTED_PROXIES` (space-separated CIDRs whose `X-Forwarded-For` is trusted; empty in compose) |
 | frontend | `VITE_API_BASE_URL=/api` (build time), `NGINX_CSP_CONNECT_SRC='self'` (runtime) |
 
 ## 11. Changelog
+- **1.6.0** (2026-10-01): no breaking changes. Gateway: trusted-proxy client IPs (`NGINX_TRUSTED_PROXIES`), upstream domain suffix (`NGINX_SERVICE_DOMAIN`) and runtime re-resolution of upstreams, for running behind a Kubernetes ingress (Phase 10).
 - **1.5.0** (2026-09-30): no breaking changes. Frontend (§8.1): routes, token handling, idempotent transfer retries, headers, health; the polling stop rule names the resting statuses (`ACCOUNT_FROZEN` included); demo sample categories and file shape (§0.8); replay and sample tools (§8.2); the gateway hides duplicate security headers from the frontend.
 - **1.4.0** (2026-09-30): no breaking changes. tierActions.json format and consistency rules; OTP hashing (`OTP_SECRET`) and sweeper behaviour; LOG alerts are audit-only; the alerting consumer's handling of transaction-service responses; gateway error envelopes, ports, security headers and env vars.
 - **1.3.0** (2026-09-30): no breaking changes. MongoDB runs as a single-node replica set, and money movements are multi-document transactions; recovery of interrupted `PENDING` transfers; every service declares the full topology of the events it touches, with mandatory publishes; transaction-service readiness no longer depends on RabbitMQ (the outbox covers outages); clarified that redelivered scored events share `eventId`/score but not timestamps.

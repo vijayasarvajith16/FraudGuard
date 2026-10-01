@@ -30,7 +30,7 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-fraudguard}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-fraudguard-dev}
-      # Per-service users, created by infra/mongo/init (first volume init, or `make mongo-users`).
+      # Per-service users, created by infra/helm/mongodb/files/init (first volume init, or `make mongo-users`).
       MONGO_AUTH_PASSWORD: ${MONGO_AUTH_PASSWORD:?set MONGO_AUTH_PASSWORD in .env}
       MONGO_TRANSACTIONS_PASSWORD: ${MONGO_TRANSACTIONS_PASSWORD:?set MONGO_TRANSACTIONS_PASSWORD in .env}
       MONGO_ALERTS_PASSWORD: ${MONGO_ALERTS_PASSWORD:?set MONGO_ALERTS_PASSWORD in .env}
@@ -38,8 +38,9 @@ services:
       - "127.0.0.1:${MONGO_HOST_PORT:-27017}:27017"
     volumes:
       - mongo-data:/data/db
-      - ./infra/mongo/init:/docker-entrypoint-initdb.d:ro
-      - ./infra/mongo:/fraudguard:ro
+      - ./infra/helm/mongodb/files/init:/docker-entrypoint-initdb.d:ro
+      # Shared with the Helm chart (single copy of the replica-set scripts).
+      - ./infra/helm/mongodb/files:/fraudguard:ro
     healthcheck:
       # Initiates the replica set on first start; healthy once this node is a writable primary.
       test:

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: fraudguard-service
+description: >-
+  Shared chart for every FraudGuard service. One release per service, named after it (the release
+  name becomes the Service's DNS name), configured by infra/helm/values/values-<service>.yaml.
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+home: https://github.com/vijayasarvajith16/FraudGuard

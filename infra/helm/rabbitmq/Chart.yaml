@@ -1,0 +1,8 @@
+apiVersion: v2
+name: fraudguard-rabbitmq
+description: >-
+  Single-node RabbitMQ with the management plugin for FraudGuard. Lightweight by design: one
+  replica, small volume; the services declare the topology themselves (docs/contracts.md §3).
+type: application
+version: 0.1.0
+appVersion: "3.13"
