@@ -1,7 +1,7 @@
 # alerting-service (docs/contracts.md §7): consumes transactions.scored and applies the tier policy.
 image:
   repository: ghcr.io/vijayasarvajith16/fraudguard-alerting-service
-  tag: sha-7dbf2bd9ed8758bb768eb3d1eb151171f1380ce4
+  tag: sha-01e3af83860c7b66a4eabf4daa99b7e19b443bfe
 
 port: 3003
 runAsUser: 1000
