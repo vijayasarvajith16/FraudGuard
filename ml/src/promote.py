@@ -5,7 +5,9 @@ Run by .github/workflows/model-promotion.yml, one subcommand per step:
     resolve     Which versions to evaluate (default: the `candidate` alias of each model) and which
                 versions are in `production`.
     decide      promote or reject, from evaluate.py's JSON reports: the candidate passed the floors,
-                and does not regress against production (unless --allow-regression, for rollbacks).
+                does not regress against production, and does not send noticeably more traffic to
+                deep-scan without a recall gain (comparisons skipped with --allow-regression, for
+                rollbacks; never the floors).
     pin-values  Rewrite MODEL_URI in the scan services' Helm values: the version that runs is
                 pinned in Git, and Argo CD rolls the pods when it changes.
     apply       Point the `production` alias at the versions and record the promotion on them.
@@ -40,6 +42,11 @@ DEFAULT_VALUES_DIR = ML_ROOT.parent / "infra" / "helm" / "values"
 # Regression allowed against production before a candidate is rejected (absolute, on 0..1 metrics).
 DEFAULT_TOLERANCE = 0.01
 COMPARED = ("recall", "pr_auc")  # headline metrics that must not regress
+# Cost: more traffic to deep-scan (percentage points of all transactions) is accepted only together
+# with a real recall gain. The first promotion through this workflow (quick-scan v3) raised deep-scan
+# traffic from 6.1% to 10.2% of transactions with exactly the same cascade results.
+DEFAULT_MAX_TRAFFIC_INCREASE = 1.0
+DEFAULT_MIN_RECALL_GAIN = 0.01
 _MODEL_URI_LINE = re.compile(
     r'^(?P<indent>[ \t]*)MODEL_URI:[ \t]*"?models:/(?P<name>[^/@"\s]+)(?:@[\w-]+|/\d+)"?[ \t]*$', re.MULTILINE
 )
@@ -94,8 +101,32 @@ class Decision:
         return "promote" if self.promote else "reject"
 
 
-def decide(candidate: dict, production: dict | None, tolerance: float, allow_regression: bool) -> Decision:
-    """Promote only a candidate that passed every floor and does not regress against production."""
+def _traffic_cost(candidate: dict, production: dict, max_increase: float, min_gain: float) -> str | None:
+    """Why the candidate's extra deep-scan traffic is not worth it, or None."""
+    new = (candidate.get("cascade") or {}).get("deep_scan_traffic_pct")
+    old = (production.get("cascade") or {}).get("deep_scan_traffic_pct")
+    if new is None or old is None or new - old <= max_increase:
+        return None
+    gain = candidate["headline"]["recall"] - production["headline"]["recall"]
+    if gain >= min_gain:
+        return None
+    return (
+        f"cost: deep-scan traffic {old:.2f}% -> {new:.2f}% of transactions (+{new - old:.2f} points) "
+        f"for a recall gain of {gain:+.4f} (more traffic needs at least +{min_gain})"
+    )
+
+
+def decide(
+    candidate: dict,
+    production: dict | None,
+    tolerance: float,
+    allow_regression: bool,
+    *,
+    max_traffic_increase: float = DEFAULT_MAX_TRAFFIC_INCREASE,
+    min_recall_gain: float = DEFAULT_MIN_RECALL_GAIN,
+) -> Decision:
+    """Promote only a candidate that passed every floor, does not regress against production, and
+    does not buy its results with deep-scan traffic that brings no recall."""
     reasons: list[str] = []
     gates = candidate.get("gates") or {}
     floors = {k: gates.get(f"min_{k}") for k in ("recall", "pr_auc", "precision")}
@@ -109,6 +140,9 @@ def decide(candidate: dict, production: dict | None, tolerance: float, allow_reg
             new, old = candidate["headline"][metric], production["headline"][metric]
             if new < old - tolerance:
                 reasons.append(f"regression: {metric} {new:.4f} < production {old:.4f} - {tolerance}")
+        cost = _traffic_cost(candidate, production, max_traffic_increase, min_recall_gain)
+        if cost:
+            reasons.append(cost)
     shas = {r.get("dataset_sha256") for r in (candidate, production) if r}
     if len(shas) > 1:
         reasons.append("the reports were computed on different datasets")
@@ -238,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--candidate", required=True, help="evaluate.py report of the candidate (with floors)")
     p.add_argument("--production", help="evaluate.py report of production (omit if there is none)")
     p.add_argument("--tolerance", type=float, default=DEFAULT_TOLERANCE)
+    p.add_argument("--max-traffic-increase", type=float, default=DEFAULT_MAX_TRAFFIC_INCREASE)
+    p.add_argument("--min-recall-gain", type=float, default=DEFAULT_MIN_RECALL_GAIN)
     p.add_argument("--allow-regression", action="store_true", help="deliberate rollback: skip the comparison")
     p.add_argument("--summary", help="append a markdown summary here (GITHUB_STEP_SUMMARY)")
     p.add_argument("--github-output")
@@ -271,7 +307,14 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.command == "decide":
             candidate, production = _read_json(args.candidate), _read_json(args.production)
-            decision = decide(candidate, production, args.tolerance, args.allow_regression)
+            decision = decide(
+                candidate,
+                production,
+                args.tolerance,
+                args.allow_regression,
+                max_traffic_increase=args.max_traffic_increase,
+                min_recall_gain=args.min_recall_gain,
+            )
             text = summary_markdown(decision, candidate, production, args.allow_regression)
             if args.summary:
                 with open(args.summary, "a", encoding="utf-8") as fh:
