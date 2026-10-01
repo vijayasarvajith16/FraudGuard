@@ -15,7 +15,8 @@ LABEL_COLUMN = "Class"
 
 QUICK_SCAN_MODEL_NAME = "fraudguard-quick-scan"
 DEEP_SCAN_MODEL_NAME = "fraudguard-deep-scan"
-CANDIDATE_ALIAS = "candidate"
+CANDIDATE_ALIAS = "candidate"  # set by training
+PRODUCTION_ALIAS = "production"  # set by promotion (src/promote.py, docs/mlops.md)
 
 # Risk tier thresholds on the deep-scan probability (docs/contracts.md §6.1).
 DEFAULT_TIER_THRESHOLDS = {"medium": 0.30, "high": 0.70, "critical": 0.90}
