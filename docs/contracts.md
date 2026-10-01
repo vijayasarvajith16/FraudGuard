@@ -431,7 +431,7 @@ All queues are durable. Consumers use `prefetch = 10` and manual acknowledgement
 - **Failure is loud:** if the model cannot be loaded (registry unreachable, alias missing, metadata missing, features mismatched), the process logs at `fatal` and exits non-zero. The orchestrator restarts it with backoff, and it never serves with a default or partial model.
 - `ALLOW_LOCAL_MODEL_FALLBACK=true` plus `LOCAL_MODEL_PATH` (an MLflow model directory) is used only in tests and offline development. `/health` then reports `"source": "local"`.
 
-Metrics: `scan_requests_total{result="flagged|clean|error"}`, `scan_latency_seconds` (histogram), `scan_flagged_total`, `model_version_info{name,version}` (gauge = 1).
+Metrics: `scan_requests_total{result="flagged|clean|error"}`, `scan_latency_seconds` (histogram), `scan_flagged_total`, `model_version_info{name,version}` (gauge = 1), `scan_score` (histogram of the anomaly score, for drift monitoring), `model_expected_flag_rate{version}` (gauge: the loaded version's flag rate on validation data, from its training run; absent when unknown).
 
 ## 5. deep-scan-service (XGBoost)
 
@@ -449,7 +449,7 @@ Metrics: `scan_requests_total{result="flagged|clean|error"}`, `scan_latency_seco
   ```
 - `400`; `503 MODEL_NOT_LOADED`.
 
-Metrics: the §4 metrics, plus `queue_messages_consumed_total{result="ok|retry|dead_lettered"}`, `queue_processing_latency_seconds` (histogram, from `occurredAt` to ack), `risk_tier_total{tier}`.
+Metrics: the §4 metrics (with `scan_score` = the fraud probability, and without `scan_flagged_total` / `model_expected_flag_rate`), plus `queue_messages_consumed_total{result="ok|retry|dead_lettered"}`, `queue_processing_latency_seconds` (histogram, from `occurredAt` to ack), `risk_tier_total{tier}`.
 
 ---
 
@@ -634,7 +634,7 @@ Every service reads configuration only from the environment and ships a `.env.ex
 | frontend | `VITE_API_BASE_URL=/api` (build time), `NGINX_CSP_CONNECT_SRC='self'` (runtime) |
 
 ## 11. Changelog
-- **1.7.0** (2026-10-01): no breaking changes. §4.1: Kubernetes pins the model version in `MODEL_URI` (promotion rewrites it in Git).
+- **1.7.0** (2026-10-01): no breaking changes. §4.1: Kubernetes pins the model version in `MODEL_URI` (promotion rewrites it in Git). Drift metrics: `scan_score` in both scan services, `model_expected_flag_rate` in quick-scan.
 - **1.6.0** (2026-10-01): no breaking changes. Gateway: trusted-proxy client IPs (`NGINX_TRUSTED_PROXIES`), upstream domain suffix (`NGINX_SERVICE_DOMAIN`) and runtime re-resolution of upstreams, for running behind a Kubernetes ingress (Phase 10).
 - **1.5.0** (2026-09-30): no breaking changes. Frontend (§8.1): routes, token handling, idempotent transfer retries, headers, health; the polling stop rule names the resting statuses (`ACCOUNT_FROZEN` included); demo sample categories and file shape (§0.8); replay and sample tools (§8.2); the gateway hides duplicate security headers from the frontend.
 - **1.4.0** (2026-09-30): no breaking changes. tierActions.json format and consistency rules; OTP hashing (`OTP_SECRET`) and sweeper behaviour; LOG alerts are audit-only; the alerting consumer's handling of transaction-service responses; gateway error envelopes, ports, security headers and env vars.

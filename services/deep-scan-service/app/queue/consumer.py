@@ -60,6 +60,7 @@ class FlaggedMessageHandler:
                 result = self.scorer.score(event.payload.feature_vector())
             self.metrics.scan_requests.labels("clean" if result.risk_tier == "LOW" else "flagged").inc()
             self.metrics.risk_tiers.labels(result.risk_tier).inc()
+            self.metrics.scan_score.observe(result.probability)
             out = scored_event(
                 event,
                 probability=result.probability,

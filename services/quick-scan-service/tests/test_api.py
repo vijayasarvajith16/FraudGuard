@@ -98,7 +98,7 @@ def test_health_reports_model(client):
     assert res.json() == {
         "status": "ok",
         "service": "quick-scan-service",
-        "version": "1.0.0",
+        "version": "1.1.0",
         "uptimeSeconds": res.json()["uptimeSeconds"],
         "checks": {"model": "ok"},
         "model": {"name": "fraudguard-quick-scan", "version": "local", "alias": None, "source": "local"},
@@ -118,6 +118,11 @@ def test_metrics_expose_scan_and_model_info(client):
     assert 'model_version_info{alias="",name="fraudguard-quick-scan",source="local",version="local"} 1.0' in text
     assert 'http_requests_total{method="POST",route="/score",status="400"} 1.0' in text
     assert "scan_latency_seconds_bucket" in text
+    # Drift monitoring: both valid requests are in the score distribution. A local model has no
+    # training run, so there is no expected flag rate (the series is absent, not 0).
+    assert "scan_score_count 2.0" in text
+    assert 'scan_score_bucket{le="+Inf"} 2.0' in text
+    assert "model_expected_flag_rate{" not in text
 
 
 def test_request_id_is_echoed_or_generated(client):

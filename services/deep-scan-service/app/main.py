@@ -145,6 +145,7 @@ def create_app(settings: Settings | None = None, scorer: DeepScanScorer | None =
             result = active.score(body.feature_vector())
         metrics.scan_requests.labels("clean" if result.risk_tier == "LOW" else "flagged").inc()
         metrics.risk_tiers.labels(result.risk_tier).inc()
+        metrics.scan_score.observe(result.probability)
 
         return DeepScoreResponse(
             transactionId=body.transactionId,

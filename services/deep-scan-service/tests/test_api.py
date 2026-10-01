@@ -80,6 +80,10 @@ def test_health_and_metrics(client):
     assert 'scan_requests_total{result="flagged"} 1.0' in text
     assert 'model_version_info{alias="",name="fraudguard-deep-scan",source="local",version="local"} 1.0' in text
     assert "scan_latency_seconds_bucket" in text
+    # Drift monitoring: the probability distribution (one normal, one fraud transaction).
+    assert "scan_score_count 2.0" in text
+    assert 'scan_score_bucket{le="0.3"} 1.0' in text
+    assert 'scan_score_bucket{le="+Inf"} 2.0' in text
 
 
 def test_error_envelope_and_request_id(client):
