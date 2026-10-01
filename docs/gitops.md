@@ -90,6 +90,7 @@ new version with the repository's values and validates it before the merge.
 |---|---|
 | Deploy a change | Merge a PR. Nothing else. |
 | Roll back a service | `git revert` its `chore(release)` commit (or set an older `sha-` tag in its values file) and merge. Argo CD rolls back the same way it rolls forward. |
+| Promote or roll back a model | The model-promotion workflow pins the version in the scan services' values (`chore(model): promote …`, after an approval); `git revert` of that commit rolls the model back (docs/mlops.md). |
 | Change configuration | Edit `infra/helm/values/values-<service>.yaml` (env, resources, the alerting tier policy) and merge. Env changes roll the pods; the tier policy is reloaded in place (docs/kubernetes.md). |
 | See status | `make k8s-status`, or `make k8s-argocd` for the UI (https://localhost:8443, user `admin`). |
 | Test a branch before merging | `ARGOCD_REVISION=<branch> make k8s-up`: the whole tree follows that branch. Run `make k8s-up` again to return to `main`. |

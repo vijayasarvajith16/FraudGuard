@@ -52,6 +52,7 @@ Values files: `infra/monitoring/*-values.yaml`; alert rules: `infra/monitoring/a
 | RabbitMQ queue lag | `rabbitmq_detailed_queue_messages_ready` per queue |
 | Time to verdict | deep-scan and alerting `queue_processing_latency_seconds` (event time to acknowledgement) |
 | Errors | 5xx share per service, responses by status, quick-scan call results, consumer outcomes |
+| Models | the version each scan service runs (`model_version_info`), quick-scan's flag rate against the model's `model_expected_flag_rate`, and heatmaps of `scan_score` (quick-scan's anomaly score, deep-scan's probability): drift monitoring, docs/mlops.md |
 | Firing alerts, models in service | `ALERTS`, `model_version_info` |
 
 **FraudGuard: autoscaling** (`fraudguard-autoscaling`): gateway requests per second (from the nginx
@@ -91,6 +92,7 @@ sent anywhere: firing alerts show in Prometheus (`/alerts`) and on the pipeline 
 | `DeepScanVerdictDelayed` | p95 from a flagged event to its acknowledged score above 10 s | 5 min | warning |
 | `DeadLetterQueueNotEmpty` | any `*.dlq` queue holds messages | 1 min | warning |
 | `QuickScanLatencySLOBreach` | quick-scan scoring p95 above 20 ms (contract §4) | 5 min | critical |
+| `QuickScanFlagRateDrift` | quick-scan's 1-hour flag rate is above 2x or below half of the loaded model's validation flag rate (at least 0.05 req/s; quiet without a baseline) | 30 min | warning |
 | `DeepScanLatencySLOBreach` | deep-scan scoring p95 above 20 ms | 5 min | warning |
 | `HighErrorRate` | more than 5% 5xx on a service's API (health checks excluded, at least 0.1 req/s) | 5 min | warning |
 | `QuickScanCallsFailing` | more than 5% of quick-scan calls time out or fail (those transfers go to review) | 5 min | warning |
@@ -105,7 +107,7 @@ Docker:
    (`tests/monitoring/alert-rules.test.yaml`): every alert fires on synthetic series at the expected
    minute with the expected labels and rendered annotations, and the negative cases stay quiet (other
    namespaces, retry queues, failing health checks, a low-traffic service, a steady CRITICAL rate).
-2. Every PromQL query in the dashboards must parse (62 queries).
+2. Every PromQL query in the dashboards must parse (69 queries).
 
 CI also renders the four upstream charts with these values files and validates the output with
 kubeconform.

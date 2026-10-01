@@ -34,6 +34,7 @@ How the pipelines work, the image tags and branch protection: [docs/ci.md](docs/
 - Performance (k6 load test results): [docs/performance.md](docs/performance.md)
 - Cloud environment as code (Terraform for Oracle Cloud; written, not applied): [docs/terraform.md](docs/terraform.md)
 - ML results: [docs/ml-results.md](docs/ml-results.md)
+- MLOps (train, evaluate, approve, promote, roll out, monitor drift): [docs/mlops.md](docs/mlops.md)
 - Project conventions: [CLAUDE.md](CLAUDE.md)
 
 ## Run it locally

@@ -68,7 +68,7 @@ Deep-scan tiers served by the container match the evaluation exactly (test-split
 
 ## Regression-gate floors
 
-Set from these results with a margin of roughly 3 fraud cases on recall:
+Set from these results with a margin of roughly 3 fraud cases on recall. The model-promotion workflow enforces them on every candidate, along with no regression against production (docs/mlops.md):
 
 | Gate | Floor | Current |
 |---|---|---|
