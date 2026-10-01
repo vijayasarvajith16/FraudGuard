@@ -16,7 +16,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
 from .config import DEFAULT_MODEL_NAME, Settings, load_settings
 from .metrics import Metrics
-from .model_loader import ModelLoadError, fetch_model
+from .model_loader import ModelLoadError, fetch_model, training_metric
 from .schemas import ErrorResponse, QuickScoreResponse, ScoreRequest
 from .scorer import QuickScanScorer
 
@@ -52,6 +52,9 @@ def create_app(settings: Settings | None = None, scorer: QuickScanScorer | None 
                 raise
         app.state.scorer = active
         metrics.set_model(active.artifact.describe())
+        expected = training_metric(settings.tracking_uri, active.artifact, "val.flag_rate")
+        if expected is not None:
+            metrics.expected_flag_rate.labels(active.artifact.version).set(expected)
         log.info(
             "model loaded",
             extra={"model": active.artifact.describe(), "threshold": active.threshold},
@@ -124,6 +127,7 @@ def create_app(settings: Settings | None = None, scorer: QuickScanScorer | None 
         with metrics.scan_latency.time():
             result = active.score(body.feature_vector())
         metrics.scan_requests.labels("flagged" if result.flagged else "clean").inc()
+        metrics.scan_score.observe(result.score)
         if result.flagged:
             metrics.scan_flagged.inc()
 

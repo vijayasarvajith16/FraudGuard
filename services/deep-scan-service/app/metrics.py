@@ -15,6 +15,8 @@ from prometheus_client import (
 
 # Fine-grained low buckets: single-row scoring takes a few milliseconds.
 LATENCY_BUCKETS = (0.001, 0.0025, 0.005, 0.0075, 0.01, 0.015, 0.02, 0.03, 0.05, 0.1, 0.25)
+# Fraud probability; the edges include the tier thresholds (0.30 / 0.70 / 0.90, contract §6.1).
+SCORE_BUCKETS = (0.01, 0.05, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 0.95, 0.99)
 
 
 class Metrics:
@@ -37,6 +39,10 @@ class Metrics:
             "scan_latency_seconds", "Model scoring time (excludes HTTP)", buckets=LATENCY_BUCKETS, registry=r
         )
         self.risk_tiers = Counter("risk_tier_total", "Scored transactions by risk tier", ["tier"], registry=r)
+        # The model's raw output over time: a shifting distribution is drift (docs/mlops.md).
+        self.scan_score = Histogram(
+            "scan_score", "Fraud probability of each scored transaction", buckets=SCORE_BUCKETS, registry=r
+        )
         self.queue_consumed = Counter(
             "queue_messages_consumed_total", "transactions.flagged deliveries by outcome", ["result"], registry=r
         )

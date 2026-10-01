@@ -70,6 +70,48 @@ def test_alias_is_resolved_to_a_version_and_that_version_is_downloaded(monkeypat
     assert loaded.metadata["threshold"] > 0
 
 
+class FakeRegistry:
+    """MlflowClient stand-in: one model version whose training run logged val.flag_rate."""
+
+    def __init__(self, tracking_uri, metrics=None, fail=False):
+        self.metrics = {"val.flag_rate": 0.0596} if metrics is None else metrics
+        self.fail = fail
+
+    def get_model_version(self, name, version):
+        if self.fail:
+            raise ConnectionError("registry down")
+        return type("MV", (), {"run_id": "run-1"})()
+
+    def get_run(self, run_id):
+        return type("Run", (), {"data": type("Data", (), {"metrics": self.metrics})()})()
+
+
+@pytest.mark.parametrize(
+    ("client_kwargs", "expected"),
+    [({}, 0.0596), ({"metrics": {}}, None), ({"fail": True}, None)],
+)
+def test_training_metric_is_read_from_the_versions_run_best_effort(monkeypatch, model_dir, client_kwargs, expected):
+    import mlflow
+
+    monkeypatch.setattr(mlflow, "MlflowClient", lambda tracking_uri: FakeRegistry(tracking_uri, **client_kwargs))
+    assert model_loader.training_metric("https://tracking", artifact(model_dir), "val.flag_rate") == expected
+
+
+def test_training_metric_is_none_for_a_local_model(model_dir):
+    local = ModelArtifact(Path(model_dir), "fraudguard-quick-scan", "local", None, "local", {})
+    assert model_loader.training_metric("https://tracking", local, "val.flag_rate") is None
+
+
+def test_the_expected_flag_rate_is_exported_per_model_version(monkeypatch, model_dir):
+    import app.main
+
+    monkeypatch.setattr(app.main, "training_metric", lambda uri, art, key: 0.0596)
+    scorer = QuickScanScorer(artifact(model_dir, {"threshold": 0.5}))
+    settings = load_settings({"MLFLOW_TRACKING_URI": "https://tracking"})
+    with TestClient(create_app(settings, scorer=scorer)) as client:
+        assert 'model_expected_flag_rate{version="7"} 0.0596' in client.get("/metrics").text
+
+
 def test_missing_threshold_fails(tmp_path, trained_forest):
     save_model_dir(tmp_path, trained_forest, {})
     with pytest.raises(ModelLoadError, match="threshold"):

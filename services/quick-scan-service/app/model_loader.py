@@ -72,6 +72,25 @@ def fetch_from_registry(tracking_uri: str, model_uri: str) -> ModelArtifact:
     return ModelArtifact(local_dir, name, version, alias, "registry", read_metadata(local_dir))
 
 
+def training_metric(tracking_uri: str | None, artifact: ModelArtifact, key: str) -> float | None:
+    """A metric of the training run behind a registry model version (e.g. val.flag_rate), or None.
+
+    Best effort: it feeds monitoring only, so a missing run or metric is logged, never fatal.
+    """
+    if artifact.source != "registry" or not tracking_uri:
+        return None
+    try:
+        from mlflow import MlflowClient
+
+        client = MlflowClient(tracking_uri=tracking_uri)
+        run_id = client.get_model_version(artifact.name, artifact.version).run_id
+        value = client.get_run(run_id).data.metrics.get(key) if run_id else None
+    except Exception as exc:
+        log.warning("training metric unavailable", extra={"metric": key, "error": str(exc)})
+        return None
+    return None if value is None else float(value)
+
+
 def fetch_local(path: str, default_name: str) -> ModelArtifact:
     model_dir = Path(path)
     if not model_dir.is_dir():

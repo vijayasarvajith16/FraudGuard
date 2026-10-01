@@ -118,6 +118,8 @@ def test_scores_publishes_and_acks(handler_factory):
     text = metrics.render().decode()
     assert 'queue_messages_consumed_total{result="ok"} 1.0' in text
     assert 'risk_tier_total{tier="CRITICAL"} 1.0' in text
+    assert 'scan_score_bucket{le="0.9"} 0.0' in text  # a CRITICAL probability is above 0.9
+    assert "scan_score_count 1.0" in text
 
 
 def test_redelivery_produces_the_same_event_id(handler_factory):
