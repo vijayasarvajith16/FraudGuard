@@ -11,6 +11,10 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # ---- runtime ----
 FROM node:${NODE_VERSION} AS runtime
+# No package managers at runtime: the service starts with plain `node`, and npm, yarn and corepack
+# bundle their own dependencies (with CVEs the service never uses).
+RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack \
+        /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-*
 ENV NODE_ENV=production \
     PORT=3002
 WORKDIR /app

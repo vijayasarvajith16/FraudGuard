@@ -92,6 +92,83 @@ def test_quick_scan_down_sends_the_transfer_to_review_and_recovers(new_user, bob
     assert after.body["transaction"]["quickScan"]["reason"] == "NORMAL"
 
 
+SQUATTER = "e2e-ip-squatter"
+
+
+@pytest.fixture
+def auth_service():
+    yield "auth-service"
+    ids = subprocess.run(
+        ["docker", "ps", "-aq", "--filter", f"name={SQUATTER}-"], capture_output=True, text=True
+    ).stdout.split()
+    if ids:
+        subprocess.run(["docker", "rm", "-f", *ids], capture_output=True)
+    restore("auth-service")
+
+
+def container_ip(name):
+    return subprocess.run(
+        ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", name],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_gateway_follows_a_redeployed_service_to_its_new_address(api, auth_service):
+    """Regression: nginx used to keep upstream IPs from startup, so a recreated service got 502s."""
+    old_container = compose("ps", "-q", auth_service).stdout.strip()
+    old_ip = container_ip(old_container)
+    network = subprocess.run(
+        ["docker", "inspect", "-f", "{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}", old_container],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    image = subprocess.run(
+        ["docker", "inspect", "-f", "{{.Config.Image}}", old_container], capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    compose("rm", "-sf", auth_service)
+    # Docker hands out the lowest free address, so park placeholders until one holds the freed
+    # address; the recreated service is then guaranteed a different one.
+    for i in range(32):
+        name = f"{SQUATTER}-{i}"
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "-d",
+                "--rm",
+                "--name",
+                name,
+                "--network",
+                network,
+                "--entrypoint",
+                "sleep",
+                image,
+                "300",
+            ],
+            capture_output=True,
+            check=True,
+        )
+        if container_ip(name) == old_ip:
+            break
+    else:
+        pytest.fail(f"could not reserve {old_ip} on {network}")
+    restore(auth_service)
+    new_ip = container_ip(compose("ps", "-q", auth_service).stdout.strip())
+    assert new_ip != old_ip
+
+    deadline = time.monotonic() + 20  # the upstream resolver's valid=10s, plus margin
+    while True:
+        res = api.call("POST", "/api/auth/login", {"email": "nobody@demo.test", "password": "x1x1x1x1"})
+        if res.status == 401:  # reached auth-service (wrong credentials), not a gateway 502
+            break
+        assert time.monotonic() < deadline, f"gateway still answers {res.status} for the redeployed service"
+        time.sleep(1)
+
+
 def test_deep_scan_down_keeps_flagged_transfers_held_until_it_returns(new_user, bob, deep_scan, samples):
     alice = new_user("ds-down", deposit=1000)
     row = samples["categories"]["fraud"][0]
