@@ -10,7 +10,8 @@ service changes and calls one of two reusable pipelines; repository-wide checks 
 | `auth-service`, `transaction-service`, `alerting-service`, `frontend` | push to `main` and PRs to `main` touching the package (or its pipeline files) | `_node-service.yml`: lint and format check, unit tests with coverage (75% line floor), `npm audit` of production dependencies, then the image pipeline. |
 | `quick-scan-service`, `deep-scan-service` | same, for the service | `_python-service.yml`: ruff, pytest with coverage (75% floor), `pip-audit` of runtime requirements, then the image pipeline. |
 | `api-gateway` | same, for the gateway | Renders the Nginx templates and runs `nginx -t`, lints the black-box tests, then the image pipeline. |
-| `ml` | changes under `ml/` | ruff and the sanity tests on synthetic data with tiny models. **No training in CI** (training runs in Colab). |
+| `ml` | changes under `ml/` | ruff and the sanity tests on synthetic data with tiny models, and the promotion tooling against a throwaway registry. **No training in CI** (training runs in Colab). |
+| `model-promotion` | daily, and on demand | Evaluates the registered `@candidate` models on the checksum-verified test split against the floors and production; after a reviewer approves (environment `model-registry`), pins the version in the Helm values and moves `@production` (docs/mlops.md). |
 | `tools` | changes under `tools/` | ruff and the tool tests (fake gateway and scan servers). |
 | `e2e` | every PR to `main` (not docs-only) | Builds the whole compose stack from the PR and runs the end-to-end suite, the gateway black-box tests and the RabbitMQ integration tests (docs/testing.md). Logs are uploaded on failure. |
 | `codeql` | push, PR, weekly | CodeQL `security-and-quality` for JavaScript, Python and the workflows themselves. |
