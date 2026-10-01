@@ -3,7 +3,7 @@ image:
   repository: ghcr.io/vijayasarvajith16/fraudguard-api-gateway
   # 1.1.0: NGINX_SERVICE_DOMAIN / NGINX_TRUSTED_PROXIES support (contract 1.6.0). Phase 12 automates
   # these bumps.
-  tag: sha-f9c832a35cef1f5f0c9b808a659581c051e3a7e6
+  tag: sha-01e3af83860c7b66a4eabf4daa99b7e19b443bfe
 
 port: 8080
 runAsUser: 101 # nginx-unprivileged
