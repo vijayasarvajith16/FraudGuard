@@ -12,6 +12,11 @@ or a local model directory (default: the copies saved by the training scripts).
 
 Exit codes: 0 = all gates passed, 1 = a gate failed, 2 = usage or runtime error.
 
+The dataset is verified before anything is scored: with --expect-sha256 its SHA-256 must match, and
+a registry model must carry the dataset_sha256 tag of the data it was trained on, equal to this
+file's hash. A wrong, truncated or partial file therefore exits with 2 instead of producing
+metrics for a different test split.
+
 Examples:
     python src/evaluate.py --data data/creditcard.csv
     python src/evaluate.py --data data/creditcard.csv \\
@@ -24,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -31,6 +37,7 @@ import mlflow
 import mlflow.sklearn
 import mlflow.xgboost
 import numpy as np
+from mlflow import MlflowClient
 
 from common import (
     ARTIFACTS_DIR,
@@ -39,6 +46,7 @@ from common import (
     configure_mlflow,
     log,
     setup_logging,
+    sha256_file,
 )
 from data import load_splits
 from metrics import (
@@ -54,6 +62,38 @@ from metrics import (
 
 DEFAULT_QUICK_MODEL = str(ARTIFACTS_DIR / "quick_scan" / "model")
 DEFAULT_DEEP_MODEL = str(ARTIFACTS_DIR / "deep_scan" / "model")
+_REGISTRY_URI = re.compile(r"^models:/(?P<name>[^/@]+)(?:@(?P<alias>[\w-]+)|/(?P<version>\d+))$")
+
+
+def registry_dataset_sha256(uri: str) -> str | None:
+    """SHA-256 of the dataset a registry model version was trained on; None for a local model."""
+    m = _REGISTRY_URI.match(uri)
+    if m is None:
+        return None
+    client = MlflowClient()
+    if m["alias"]:
+        version = client.get_model_version_by_alias(m["name"], m["alias"])
+    else:
+        version = client.get_model_version(m["name"], m["version"])
+    sha = version.tags.get("dataset_sha256")
+    if not sha:
+        raise ValueError(f"{uri} (version {version.version}) has no dataset_sha256 tag: unknown training data")
+    return sha
+
+
+def verify_dataset(args) -> str:
+    """Hash the dataset and refuse it unless it is exactly the expected file. Returns the hash."""
+    actual = sha256_file(args.data)
+    if args.expect_sha256 and actual != args.expect_sha256.lower():
+        raise ValueError(f"dataset SHA-256 is {actual}, expected {args.expect_sha256}: wrong or incomplete file")
+    uris = ([args.quick_model] if args.mode in ("quick", "cascade") else []) + (
+        [args.deep_model] if args.mode in ("deep", "cascade") else []
+    )
+    for uri in uris:
+        trained_on = registry_dataset_sha256(uri)
+        if trained_on is not None and trained_on != actual:
+            raise ValueError(f"{uri} was trained on dataset {trained_on[:16]}..., but {args.data} is {actual[:16]}...")
+    return actual
 
 
 def model_metadata(uri: str) -> dict:
@@ -84,11 +124,18 @@ def check_gates(report: dict, args) -> list[str]:
 
 def evaluate(args) -> tuple[dict, CascadeResult | None, tuple[np.ndarray, np.ndarray] | None]:
     """Return (report, cascade result, (labels, deep probabilities) for plotting)."""
+    dataset_sha256 = verify_dataset(args)
     splits = load_splits(args.data, args.seed)
     split = getattr(splits, args.split)
     y = split.y
     cascade, plot_data = None, None
-    report: dict = {"mode": args.mode, "split": args.split, "rows": len(y), "fraud": int(y.sum())}
+    report: dict = {
+        "mode": args.mode,
+        "split": args.split,
+        "rows": len(y),
+        "fraud": int(y.sum()),
+        "dataset_sha256": dataset_sha256,
+    }
 
     if args.mode in ("quick", "cascade"):
         quick_model, quick_threshold = load_quick(args.quick_model, args.quick_threshold)
@@ -192,6 +239,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--min-recall", type=float, help="gate: fail if headline recall is lower")
     parser.add_argument("--min-pr-auc", type=float, help="gate: fail if PR-AUC is lower")
     parser.add_argument("--min-precision", type=float, help="gate: fail if headline precision is lower")
+    parser.add_argument("--expect-sha256", help="refuse the dataset unless its SHA-256 is exactly this")
     parser.add_argument("--output", help="write the full report as JSON here")
     parser.add_argument("--log-to-mlflow", action="store_true", help="record this evaluation as an MLflow run")
     args = parser.parse_args(argv)
