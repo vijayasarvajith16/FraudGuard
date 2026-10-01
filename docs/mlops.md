@@ -51,6 +51,7 @@ Runs daily at 05:17 UTC and on demand (*Actions → model-promotion → Run work
 |---|---|
 | Floors (test split) | cascade recall ≥ 0.75, cascade precision ≥ 0.85, deep-scan PR-AUC ≥ 0.78 |
 | No regression | recall and PR-AUC at least production's minus 0.01 |
+| Cost | sending more than 1 percentage point more transactions to deep-scan needs a recall gain of at least 0.01 |
 | A rejected candidate | fails a manual run; warns on a scheduled run, which re-checks daily until a new candidate is registered |
 
 The evaluation job has no secrets: the registry allows anonymous reads.
@@ -102,6 +103,21 @@ retrain or roll back.
 |---|---|
 | `git revert` the `chore(model): promote …` commit | Fastest: Argo CD rolls the previous pinned version back within a minute. Then move `@production` back too, using the next row. |
 | Run the workflow with `quick_version`, `deep_version` set to the previous versions and `allow_regression` ticked | The audited path: the previous versions are evaluated against the floors (never skipped) and promoted like any candidate, with approval. |
+
+### The first promotion
+
+The loop's first run (2026-10-01) trained quick-scan with `--target-recall 0.95` and promoted v3 of
+both models. The mechanics worked end to end:
+- evaluation took 1 min 21 s;
+- after the approval, the bot pinned v3 in Git and moved `@production`;
+- Argo CD rolled both scan services, and the Grafana version panels changed from v2 to v3.
+
+The model did not improve, though. On the test split v3 caught exactly the same fraud as v2 (cascade
+recall 77.9%, precision 93.7%, identical tiers). Its quick-scan reached the 10% flag-rate cap, and the
+one extra fraud it flagged was scored LOW by deep-scan, so deep-scan traffic grew from 6.1% to 10.2% of
+transactions for nothing. The rules then were "floors and no regression", and equal results passed
+them. The **cost** rule above was added in response; on these reports it rejects v3, and accepts the
+rollback to v2.
 
 ## 8. Retrain
 

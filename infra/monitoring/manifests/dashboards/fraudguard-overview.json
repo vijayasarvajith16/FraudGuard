@@ -495,8 +495,8 @@
           },
           "expr": "max by (version) (model_version_info{app_kubernetes_io_name=\"quick-scan-service\"})",
           "legendFormat": "v{{version}}",
-          "range": true,
-          "instant": false
+          "range": false,
+          "instant": true
         }
       ],
       "fieldConfig": {
@@ -560,8 +560,8 @@
           },
           "expr": "max by (version) (model_version_info{app_kubernetes_io_name=\"deep-scan-service\"})",
           "legendFormat": "v{{version}}",
-          "range": true,
-          "instant": false
+          "range": false,
+          "instant": true
         }
       ],
       "fieldConfig": {
