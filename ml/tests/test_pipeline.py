@@ -12,7 +12,7 @@ import data
 import evaluate
 import train_deep_scan
 import train_quick_scan
-from common import CANDIDATE_ALIAS, DEEP_SCAN_MODEL_NAME, QUICK_SCAN_MODEL_NAME
+from common import CANDIDATE_ALIAS, DEEP_SCAN_MODEL_NAME, QUICK_SCAN_MODEL_NAME, sha256_file
 from conftest import isolate, make_synthetic
 
 
@@ -102,6 +102,34 @@ def test_evaluate_reads_models_from_registry_and_logs_run(trained):
     runs = mlflow.search_runs(filter_string="tags.`model.role` = 'evaluation'")
     assert len(runs) == 1
     assert runs.iloc[0]["metrics.cascade.deep_scan_traffic_pct"] > 0
+
+
+def test_evaluate_refuses_a_dataset_with_an_unexpected_sha256(trained, caplog):
+    csv, _ = trained
+    assert evaluate.main(["--data", str(csv), "--expect-sha256", "0" * 64]) == 2
+    assert "wrong or incomplete file" in caplog.text
+
+
+def test_evaluate_accepts_the_expected_sha256(trained):
+    csv, _ = trained
+    assert evaluate.main(["--data", str(csv), "--min-recall", "0.1", "--expect-sha256", sha256_file(csv)]) == 0
+
+
+def test_evaluate_refuses_registry_models_trained_on_other_data(trained, tmp_path, caplog):
+    # A download cut at a row boundary still parses: only the hash tells it apart.
+    csv, _ = trained
+    lines = csv.read_text().splitlines(keepends=True)
+    partial = tmp_path / "partial.csv"
+    partial.write_text("".join(lines[: len(lines) // 2]))
+    code = evaluate.main(
+        [
+            "--data", str(partial),
+            "--quick-model", f"models:/{QUICK_SCAN_MODEL_NAME}@{CANDIDATE_ALIAS}",
+            "--deep-model", f"models:/{DEEP_SCAN_MODEL_NAME}@{CANDIDATE_ALIAS}",
+        ]
+    )  # fmt: skip
+    assert code == 2
+    assert "was trained on dataset" in caplog.text
 
 
 def test_evaluate_returns_2_on_missing_model(synthetic_csv, isolated_mlflow):
