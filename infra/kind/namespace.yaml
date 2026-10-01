@@ -1,0 +1,12 @@
+# The application namespace. Pod Security: "baseline" is enforced because the official MongoDB and
+# RabbitMQ images start as root before dropping privileges; every FraudGuard service pod meets
+# "restricted" (non-root, read-only root filesystem, no capabilities), which is warned and audited.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: fraudguard
+  labels:
+    app.kubernetes.io/part-of: fraudguard
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

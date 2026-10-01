@@ -4,23 +4,24 @@
 
 # Service upstreams re-resolve their DNS names (`resolve`, nginx >= 1.27.3). Without it nginx keeps
 # the IPs it saw at startup, so recreating a service container (a redeploy) would make the gateway
-# answer 502 for it until the gateway itself restarted.
+# answer 502 for it until the gateway itself restarted. NGINX_SERVICE_DOMAIN completes the names
+# where the resolver has no search list (Kubernetes: ".fraudguard.svc.cluster.local"); empty in compose.
 upstream auth_service {
     zone auth_service 64k;
     resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
-    server auth-service:3001 resolve;
+    server auth-service${NGINX_SERVICE_DOMAIN}:3001 resolve;
     keepalive 16;
 }
 upstream transaction_service {
     zone transaction_service 64k;
     resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
-    server transaction-service:3002 resolve;
+    server transaction-service${NGINX_SERVICE_DOMAIN}:3002 resolve;
     keepalive 16;
 }
 upstream alerting_service {
     zone alerting_service 64k;
     resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
-    server alerting-service:3003 resolve;
+    server alerting-service${NGINX_SERVICE_DOMAIN}:3003 resolve;
     keepalive 16;
 }
 
@@ -99,7 +100,7 @@ server {
 
     # ---- frontend SPA (§8.1); resolved per request so its absence does not stop the gateway ----
     location / {
-        set $frontend_upstream http://frontend:8081;
+        set $frontend_upstream http://frontend${NGINX_SERVICE_DOMAIN}:8081;
         proxy_set_header Host $host;
         proxy_set_header X-Request-Id $req_id;
         proxy_pass $frontend_upstream;

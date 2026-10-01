@@ -1,0 +1,42 @@
+# deep-scan-service (docs/contracts.md §5): XGBoost scoring of flagged transfers, as a RabbitMQ consumer.
+# Profile: BIGGER, THROUGHPUT. Off the hot path (messages wait durably in the queue), so it reserves
+# little CPU but gets more memory headroom for the booster, the consumer and its prefetch window
+# (measured ~125 MiB steady).
+image:
+  repository: ghcr.io/vijayasarvajith16/fraudguard-deep-scan-service
+  tag: sha-7dbf2bd9ed8758bb768eb3d1eb151171f1380ce4
+
+port: 8002
+runAsUser: 10001
+
+config:
+  PORT: "8002"
+  LOG_LEVEL: INFO
+  HOME: /tmp
+  MLFLOW_TRACKING_URI: https://dagshub.com/vijayasarvajith16/fraudguard.mlflow
+  MODEL_URI: models:/fraudguard-deep-scan@production
+  GIT_PYTHON_REFRESH: quiet
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+  TIER_MEDIUM_MIN: "0.30"
+  TIER_HIGH_MIN: "0.70"
+  TIER_CRITICAL_MIN: "0.90"
+  MAX_RETRIES: "3"
+  PREFETCH: "10"
+
+secretEnv:
+  RABBITMQ_DEFAULT_USER: { secret: fraudguard-secrets, key: RABBITMQ_DEFAULT_USER }
+  RABBITMQ_DEFAULT_PASS: { secret: fraudguard-secrets, key: RABBITMQ_DEFAULT_PASS }
+  MLFLOW_TRACKING_USERNAME: { secret: fraudguard-secrets, key: MLFLOW_TRACKING_USERNAME, optional: true }
+  MLFLOW_TRACKING_PASSWORD: { secret: fraudguard-secrets, key: MLFLOW_TRACKING_PASSWORD, optional: true }
+
+env:
+  RABBITMQ_URL: "amqp://$(RABBITMQ_DEFAULT_USER):$(RABBITMQ_DEFAULT_PASS)@rabbitmq:5672"
+
+probes:
+  startup: { path: /health, periodSeconds: 5, failureThreshold: 36 }
+
+writableSizeLimit: 256Mi
+
+resources:
+  requests: { cpu: 100m, memory: 256Mi }
+  limits: { cpu: "1", memory: 512Mi }

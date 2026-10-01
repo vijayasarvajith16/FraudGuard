@@ -1,0 +1,30 @@
+# auth-service (docs/contracts.md §1). Secrets come from the fraudguard-secrets Secret, created from
+# .env by `make k8s-up` (never committed).
+image:
+  repository: ghcr.io/vijayasarvajith16/fraudguard-auth-service
+  tag: sha-d7132699509832709a0d5d85add9d7809c26573b
+
+port: 3001
+runAsUser: 1000 # the node image's "node" user
+
+config:
+  NODE_ENV: production
+  PORT: "3001"
+  LOG_LEVEL: info
+  TRUST_PROXY: "1" # the gateway (which itself resolves the client IP behind the ingress)
+  MONGO_DB: fraudguard_auth
+  JWT_EXPIRES_IN: 2h
+
+secretEnv:
+  MONGO_AUTH_PASSWORD: { secret: fraudguard-secrets, key: MONGO_AUTH_PASSWORD }
+  JWT_SECRET: { secret: fraudguard-secrets, key: JWT_SECRET }
+  INTERNAL_SERVICE_TOKEN: { secret: fraudguard-secrets, key: INTERNAL_SERVICE_TOKEN }
+  ADMIN_EMAIL: { secret: fraudguard-secrets, key: ADMIN_EMAIL }
+  ADMIN_PASSWORD: { secret: fraudguard-secrets, key: ADMIN_PASSWORD }
+
+env:
+  MONGO_URI: "mongodb://auth_service:$(MONGO_AUTH_PASSWORD)@mongodb:27017/fraudguard_auth?authSource=fraudguard_auth&replicaSet=rs0"
+
+resources:
+  requests: { cpu: 50m, memory: 96Mi }
+  limits: { cpu: 500m, memory: 256Mi }

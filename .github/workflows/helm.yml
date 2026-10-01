@@ -1,0 +1,77 @@
+# Helm charts and the kind setup: lint every chart with every service's values, render everything
+# and validate the manifests against the Kubernetes API schema (kubeconform, strict).
+name: helm
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/helm/**
+      - infra/kind/**
+      - .github/workflows/helm.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - infra/helm/**
+      - infra/kind/**
+      - .github/workflows/helm.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  KUBERNETES_VERSION: 1.34.0 # schema version for validation
+  KUBECONFORM_VERSION: 0.8.0
+  KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+  TRAEFIK_CHART_VERSION: 41.6.1 # keep in sync with infra/kind/k8s.sh
+
+jobs:
+  charts:
+    name: lint, render, validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install kubeconform (checksum-verified release binary)
+        run: |
+          tarball=kubeconform-linux-amd64.tar.gz
+          curl -fsSLO "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/${tarball}"
+          echo "${KUBECONFORM_SHA256}  ${tarball}" | sha256sum --check --strict
+          tar -xzf "$tarball" kubeconform
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+
+      - name: Lint
+        run: |
+          for values in infra/helm/values/values-*.yaml; do
+            echo "::group::service chart with ${values}"
+            helm lint --strict infra/helm/service -f "$values"
+            echo "::endgroup::"
+          done
+          helm lint --strict infra/helm/mongodb
+          helm lint --strict infra/helm/rabbitmq
+
+      - name: Render and validate
+        run: |
+          mkdir -p rendered
+          for values in infra/helm/values/values-*.yaml; do
+            svc=$(basename "$values" .yaml); svc=${svc#values-}
+            helm template "$svc" infra/helm/service -n fraudguard -f "$values" > "rendered/${svc}.yaml"
+          done
+          helm template mongodb infra/helm/mongodb -n fraudguard > rendered/mongodb.yaml
+          helm template rabbitmq infra/helm/rabbitmq -n fraudguard > rendered/rabbitmq.yaml
+          cp infra/kind/namespace.yaml rendered/
+          kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION" rendered/
+
+      - name: Ingress controller values render against the pinned chart
+        run: |
+          helm repo add traefik https://traefik.github.io/charts
+          helm template traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" \
+            -f infra/kind/traefik-values.yaml > /dev/null

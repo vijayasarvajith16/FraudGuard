@@ -1,0 +1,26 @@
+{{- if .Values.ingress.enabled }}
+{{- if not .Values.ingress.paths }}
+{{- fail "ingress.enabled requires at least one entry in ingress.paths" }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "svc.name" . }}
+  labels:
+    {{- include "svc.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  rules:
+    # No host: matches any Host header (http://localhost:<port> on kind).
+    - http:
+        paths:
+          {{- range .Values.ingress.paths }}
+          - path: {{ . }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "svc.name" $ }}
+                port:
+                  name: http
+          {{- end }}
+{{- end }}

@@ -1,0 +1,56 @@
+# alerting-service (docs/contracts.md §7): consumes transactions.scored and applies the tier policy.
+image:
+  repository: ghcr.io/vijayasarvajith16/fraudguard-alerting-service
+  tag: sha-7dbf2bd9ed8758bb768eb3d1eb151171f1380ce4
+
+port: 3003
+runAsUser: 1000
+
+config:
+  NODE_ENV: production
+  PORT: "3003"
+  LOG_LEVEL: info
+  TRUST_PROXY: "1"
+  MONGO_DB: fraudguard_alerts
+  TRANSACTION_SERVICE_URL: http://transaction-service:3002
+  EXPOSE_SIMULATED_OTP: "true" # demo cluster only; never true in a shared environment (§7)
+  TIER_ACTIONS_PATH: /app/policy/tierActions.json
+  TIER_ACTIONS_POLL_SECONDS: "10"
+
+secretEnv:
+  MONGO_ALERTS_PASSWORD: { secret: fraudguard-secrets, key: MONGO_ALERTS_PASSWORD }
+  RABBITMQ_DEFAULT_USER: { secret: fraudguard-secrets, key: RABBITMQ_DEFAULT_USER }
+  RABBITMQ_DEFAULT_PASS: { secret: fraudguard-secrets, key: RABBITMQ_DEFAULT_PASS }
+  JWT_SECRET: { secret: fraudguard-secrets, key: JWT_SECRET }
+  INTERNAL_SERVICE_TOKEN: { secret: fraudguard-secrets, key: INTERNAL_SERVICE_TOKEN }
+  OTP_SECRET: { secret: fraudguard-secrets, key: OTP_SECRET }
+
+env:
+  MONGO_URI: "mongodb://alerting_service:$(MONGO_ALERTS_PASSWORD)@mongodb:27017/fraudguard_alerts?authSource=fraudguard_alerts&replicaSet=rs0"
+  RABBITMQ_URL: "amqp://$(RABBITMQ_DEFAULT_USER):$(RABBITMQ_DEFAULT_PASS)@rabbitmq:5672"
+
+# The cluster's tier -> action policy (§6.2). Mounted from a ConfigMap; the service re-reads the file
+# every TIER_ACTIONS_POLL_SECONDS, so `helm upgrade` with a changed policy takes effect within about
+# a minute (kubelet sync + poll) without restarting the pods. The image's built-in default is
+# services/alerting-service/src/config/tierActions.json.
+configFilesMountPath: /app/policy
+configFiles:
+  tierActions.json: |
+    {
+      "version": 1,
+      "tiers": {
+        "LOW": { "action": "LOG", "resultingStatus": "APPROVED", "notifyUser": false },
+        "MEDIUM": { "action": "NOTIFY", "resultingStatus": "APPROVED", "notifyUser": true },
+        "HIGH": { "action": "OTP_STEP_UP", "resultingStatus": "AWAITING_OTP", "notifyUser": true },
+        "CRITICAL": {
+          "action": "BLOCK_AND_FREEZE",
+          "resultingStatus": "ACCOUNT_FROZEN",
+          "notifyUser": true,
+          "openReviewCase": true
+        }
+      }
+    }
+
+resources:
+  requests: { cpu: 50m, memory: 96Mi }
+  limits: { cpu: 500m, memory: 256Mi }

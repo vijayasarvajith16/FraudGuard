@@ -26,7 +26,8 @@ PY_STAMPS   := $(addsuffix /.venv/.installed,$(PY_SERVICES))
 LOAD_ENV = test -f .env || { echo "No .env: run 'make env' first."; exit 1; }; set -a; . ./.env; set +a
 
 .PHONY: help env install hooks up down ps logs mongo-users test lint e2e test-integration gateway-test \
-        ml-test ml-lint replay demo-samples secrets-scan clean-deps
+        ml-test ml-lint replay demo-samples secrets-scan clean-deps \
+        k8s-up k8s-status k8s-stop k8s-start k8s-down
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -121,6 +122,25 @@ ml-lint: ml/.venv/.installed ## Lint ML code with ruff
 # holds the real (gitignored) .env.
 secrets-scan: ## Scan the whole git history for secrets (gitleaks, .gitleaks.toml)
 	gitleaks git --redact --no-banner .
+
+# ---- kubernetes (kind) -----------------------------------------------------------------------
+
+# Local cluster: kind + Traefik + the Helm charts in infra/helm (docs/kubernetes.md).
+# KIND_HTTP_PORT=8089 (ingress on 127.0.0.1); K8S_LOCAL_IMAGES=1 deploys locally built images.
+k8s-up: ## Create a kind cluster, install the ingress controller and deploy everything
+	bash infra/kind/k8s.sh up
+
+k8s-status: ## Pods, ingress and the kind node's memory use
+	bash infra/kind/k8s.sh status
+
+k8s-stop: ## Stop the kind node (keeps the cluster and its data)
+	bash infra/kind/k8s.sh stop
+
+k8s-start: ## Resume a stopped kind node
+	bash infra/kind/k8s.sh start
+
+k8s-down: ## Delete the kind cluster and all its data
+	bash infra/kind/k8s.sh down
 
 # ---- demo -----------------------------------------------------------------------------------
 

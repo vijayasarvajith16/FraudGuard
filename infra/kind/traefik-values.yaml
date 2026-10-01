@@ -1,0 +1,39 @@
+# Traefik as the kind cluster's ingress controller (chart traefik/traefik, pinned in infra/kind/k8s.sh).
+# Why not ingress-nginx: the Kubernetes project retired it in March 2026 (no further releases or
+# security fixes). Traefik implements the standard Ingress API used by the FraudGuard charts.
+deployment:
+  replicas: 1
+
+# Run on the node that kind maps to the host (infra/kind/kind-config.yaml: ingress-ready=true, and
+# host 127.0.0.1:${KIND_HTTP_PORT} -> node port 80).
+nodeSelector:
+  ingress-ready: "true"
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+ports:
+  web:
+    hostPort: 80
+  websecure:
+    expose:
+      default: false # HTTP only on the local cluster
+
+service:
+  type: ClusterIP # traffic arrives through the hostPort, not a LoadBalancer
+
+ingressClass:
+  enabled: true
+  isDefaultClass: true
+  name: traefik
+
+providers:
+  kubernetesIngress:
+    enabled: true
+  kubernetesCRD:
+    enabled: false # only standard Ingress objects are used
+
+resources:
+  requests: { cpu: 50m, memory: 48Mi }
+  limits: { cpu: 500m, memory: 128Mi }
