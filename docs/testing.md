@@ -45,7 +45,14 @@ make hooks      # optional: git pre-commit hooks
 ```
 
 The scan services load the production models from the project's public DagsHub registry, so no
-credentials are needed. On Windows, the first `make test` downloads a MongoDB archive for the in-memory
+credentials are needed.
+
+**Second checkout on the same machine:** Compose names the project after the folder. Two checkouts in
+folders both named `FraudGuard` would share one project and its volumes, and the second `.env`'s
+passwords would not match the first one's database. Give the second checkout its own project
+(`export COMPOSE_PROJECT_NAME=fraudguard-2`) and stop the first stack before starting it (container
+names are fixed). Never run `docker compose down -v` without checking which project it targets: it
+deletes that project's volumes. On Windows, the first `make test` downloads a MongoDB archive for the in-memory
 test database (about 1 GB, once per clone, into `.cache/`; on Linux it is about 70 MB).
 
 ## Git hooks and secret scanning
