@@ -2,6 +2,8 @@
 # Load test against the local kind cluster (docs/performance.md). `make load-test`.
 #   PROFILE=ramp     stepped ramp through the gateway; quick-scan's CPU autoscaler reacts
 #   PROFILE=backlog  steady load plus a deep-scan outage; the queue-depth autoscaler drains it
+#   PROFILE=quick-scan  quick-scan's /score alone (component test of its CPU autoscaler)
+#   PROFILE=smoke    one minute of light load (checks the pipeline)
 #   LOAD_PODS=8      k6 pods (the gateway allows each client IP 20 requests/s)
 # k6 runs inside the cluster as an indexed Job and pushes its metrics to Prometheus. A watcher
 # records every autoscaler change with a timestamp, and report.py turns both into the results in
@@ -35,6 +37,7 @@ EVENTS="$OUT/events.log"
 mkdir -p "$OUT"
 # Profile: total duration in seconds, and the optional drill ("deployment stopAt resumeAt").
 DURATION="$("$PYTHON" -c 'import json,sys; p=json.load(open(sys.argv[1])); print(sum(int(s["duration"].rstrip("s")) for s in p["stages"]))' "$PROFILE_FILE")"
+SCRIPT="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("script", "transfers.js"))' "$PROFILE_FILE")"
 DRILL="$("$PYTHON" -c 'import json,sys; d=json.load(open(sys.argv[1])).get("drill"); print(d["deployment"], d["stopAt"], d["resumeAt"]) if d else None' "$PROFILE_FILE")"
 
 log "k6 image"
@@ -59,13 +62,14 @@ EOF
 k -n "$LOAD_NS" delete job -l app.kubernetes.io/name=k6 --ignore-not-found --wait=true
 # Server-side apply: the rows exceed the client-side last-applied annotation limit.
 k -n "$LOAD_NS" create configmap k6-script --from-file=transfers.js=tests/load/transfers.js \
-  --from-file=profile.json="$PROFILE_FILE" --dry-run=client -o yaml | k apply --server-side --force-conflicts -f -
+  --from-file=score.js=tests/load/score.js --from-file=profile.json="$PROFILE_FILE" --dry-run=client -o yaml | k apply --server-side --force-conflicts -f -
 k -n "$LOAD_NS" create configmap k6-rows --from-file=rows.json="$ROWS" \
   --dry-run=client -o yaml | k apply --server-side --force-conflicts -f -
 
-# Every pod registers its users first, then all start the ramp at START_AT.
-START_AT=$(($(date +%s) + 75))
-log "Run ${RUN_ID}: profile ${PROFILE}, ${PODS} k6 pods, ${DURATION} s from $(date -d "@${START_AT}" +%T 2>/dev/null || echo "+75 s")"
+# Pods register their users one after another (bcrypt is slow on purpose), then all start at START_AT.
+SETUP_SECONDS=$((60 + PODS * 14))
+START_AT=$(($(date +%s) + SETUP_SECONDS))
+log "Run ${RUN_ID}: profile ${PROFILE}, ${PODS} k6 pods, ${DURATION} s from $(date -d "@${START_AT}" +%T 2>/dev/null || echo "+${SETUP_SECONDS} s")"
 k apply -f - <<EOF
 apiVersion: batch/v1
 kind: Job
@@ -97,7 +101,7 @@ spec:
         - name: k6
           image: ${K6_IMAGE}
           imagePullPolicy: IfNotPresent
-          args: [run, --quiet, --out, experimental-prometheus-rw, /scripts/transfers.js]
+          args: [run, --quiet, --out, experimental-prometheus-rw, /scripts/${SCRIPT}]
           env:
             - { name: RUN_ID, value: "${RUN_ID}" }
             - { name: START_AT, value: "${START_AT}000" }
@@ -182,12 +186,13 @@ watch_autoscalers &
 
 log "Running; Grafana: http://localhost:8089/grafana/d/fraudguard-autoscaling"
 deadline=$((START_AT + DURATION + 600))
+status=ok
 while :; do
   succeeded="$(k -n "$LOAD_NS" get job "k6-${RUN_ID}" -o jsonpath='{.status.succeeded}')"
   failed="$(k -n "$LOAD_NS" get job "k6-${RUN_ID}" -o jsonpath='{.status.failed}')"
   [ "${succeeded:-0}" -ge "$PODS" ] && break
-  if [ "${failed:-0}" -gt 0 ]; then echo "error: ${failed} k6 pod(s) failed (logs in $OUT)"; break; fi
-  [ "$(date +%s)" -lt "$deadline" ] || { echo "error: the Job did not finish in time"; break; }
+  if [ "${failed:-0}" -gt 0 ]; then status="${failed} k6 pod(s) failed"; break; fi
+  [ "$(date +%s)" -lt "$deadline" ] || { status="the Job did not finish in time"; break; }
   sleep 10
 done
 END_AT="$(date +%s)"
@@ -201,6 +206,10 @@ sleep 45
 touch "$OUT/.stop"
 wait_for_watcher=$((SECONDS + 10))
 while [ $SECONDS -lt $wait_for_watcher ] && jobs -r | grep -q .; do sleep 1; done
+if [ "$status" != ok ]; then
+  echo "error: ${status}: no report (k6 logs in $OUT)"
+  exit 1
+fi
 
 "$PYTHON" tests/load/report.py --run-id "$RUN_ID" --profile "$PROFILE_FILE" --pods "$PODS" \
   --events "$EVENTS" --out "$OUT"
