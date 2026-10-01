@@ -393,7 +393,7 @@
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
-            "fillOpacity": 8,
+            "fillOpacity": 0,
             "showPoints": "never",
             "spanNulls": false,
             "stacking": {
@@ -434,6 +434,10 @@
                     10
                   ]
                 }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
               },
               {
                 "id": "color",
@@ -528,7 +532,37 @@
           },
           "min": 0
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target %"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -745,7 +779,8 @@
               }
             ]
           },
-          "min": 0
+          "min": 0,
+          "max": 1
         },
         "overrides": []
       },
@@ -841,7 +876,7 @@
           "custom": {
             "drawStyle": "line",
             "lineWidth": 2,
-            "fillOpacity": 8,
+            "fillOpacity": 0,
             "showPoints": "never",
             "spanNulls": false,
             "stacking": {
@@ -882,6 +917,10 @@
                     10
                   ]
                 }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
               },
               {
                 "id": "color",
@@ -976,7 +1015,37 @@
           },
           "min": 0
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
