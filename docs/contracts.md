@@ -1,6 +1,6 @@
 # FraudGuard Service Contracts
 
-**Status:** authoritative. Contract version `1.6.0`.
+**Status:** authoritative. Contract version `1.7.0`.
 Change this file first, then the code. Any change that breaks a consumer bumps the major version and the message `version` field.
 
 This document defines every HTTP API, the transaction data model, the RabbitMQ topology, the risk policy, and failure behaviour. If code and this file disagree, the code is wrong.
@@ -424,6 +424,7 @@ All queues are durable. Consumers use `prefetch = 10` and manual acknowledgement
 
 ### 4.1 Model loading (both scan services)
 - At startup the service resolves `MODEL_URI` (for example `models:/fraudguard-quick-scan@production`) to a concrete registry version, then downloads **that version** (never the alias again), so resolution and download cannot race with a promotion.
+- `MODEL_URI` is an alias (`models:/<name>@<alias>`) or a pinned version (`models:/<name>/<version>`). docker compose follows `@production`; Kubernetes pins the version in the Helm values, and promotion changes that line in Git (docs/mlops.md), so the version that runs is reviewed, versioned and rolled back like any other change.
 - MLflow is used only to download artifacts. The native file is loaded directly: `model.skops` with the service's own skops allowlist (`sklearn.tree._tree.Tree`), ignoring the allowlist declared in the model; or `model.json` as an XGBoost `Booster`.
 - Required model metadata (in `MLmodel`): quick-scan `threshold`; deep-scan `best_iteration`. Deep-scan scores with `iteration_range=(0, best_iteration + 1)`; scoring with all trees would silently ignore early stopping.
 - The model's feature names must equal §0.8's order exactly, or startup fails.
@@ -633,6 +634,7 @@ Every service reads configuration only from the environment and ships a `.env.ex
 | frontend | `VITE_API_BASE_URL=/api` (build time), `NGINX_CSP_CONNECT_SRC='self'` (runtime) |
 
 ## 11. Changelog
+- **1.7.0** (2026-10-01): no breaking changes. §4.1: Kubernetes pins the model version in `MODEL_URI` (promotion rewrites it in Git).
 - **1.6.0** (2026-10-01): no breaking changes. Gateway: trusted-proxy client IPs (`NGINX_TRUSTED_PROXIES`), upstream domain suffix (`NGINX_SERVICE_DOMAIN`) and runtime re-resolution of upstreams, for running behind a Kubernetes ingress (Phase 10).
 - **1.5.0** (2026-09-30): no breaking changes. Frontend (§8.1): routes, token handling, idempotent transfer retries, headers, health; the polling stop rule names the resting statuses (`ACCOUNT_FROZEN` included); demo sample categories and file shape (§0.8); replay and sample tools (§8.2); the gateway hides duplicate security headers from the frontend.
 - **1.4.0** (2026-09-30): no breaking changes. tierActions.json format and consistency rules; OTP hashing (`OTP_SECRET`) and sweeper behaviour; LOG alerts are audit-only; the alerting consumer's handling of transaction-service responses; gateway error envelopes, ports, security headers and env vars.
