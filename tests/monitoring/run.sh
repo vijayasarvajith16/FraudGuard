@@ -13,6 +13,9 @@ PROMETHEUS_IMAGE=quay.io/prometheus/prometheus:v3.15.0@sha256:efd719c99d83b060d9
 YQ_IMAGE=mikefarah/yq:4.54.1@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
 
 work="$(mktemp -d)"
+# mktemp creates the directory 0700; promtool runs as "nobody" in its image and must read it (on
+# Linux the bind mount keeps the host permissions; Docker Desktop does not, so this only shows in CI).
+chmod 0755 "$work"
 trap 'rm -rf "$work"' EXIT
 # Docker Desktop on Windows (Git Bash) needs a Windows path for the bind mount.
 native_path() { if command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
