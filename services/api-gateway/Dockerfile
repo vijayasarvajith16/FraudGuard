@@ -2,7 +2,7 @@
 
 # Official unprivileged image (stable branch): runs as uid 101, listens on 8080, renders
 # /etc/nginx/templates/*.template with envsubst and runs /docker-entrypoint.d/*.sh at startup.
-FROM nginxinc/nginx-unprivileged:1.30.5-alpine
+FROM nginxinc/nginx-unprivileged:1.31.5-alpine
 
 ENV NGINX_RESOLVER=127.0.0.11 \
     CORS_ALLOWED_ORIGINS="" \
