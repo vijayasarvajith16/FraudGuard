@@ -82,12 +82,14 @@ spec:
             periodSeconds: 15
             timeoutSeconds: 20
             failureThreshold: 6
+          # Liveness is deliberately cheap: rabbitmq-diagnostics boots an Erlang VM and timed out under
+          # host CPU contention, which got a healthy broker restarted. Readiness keeps the full check.
           livenessProbe:
-            exec:
-              command: [rabbitmq-diagnostics, -q, status]
-            initialDelaySeconds: 60
-            periodSeconds: 30
-            timeoutSeconds: 20
+            tcpSocket:
+              port: amqp
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
             failureThreshold: 6
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
