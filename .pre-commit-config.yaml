@@ -13,7 +13,7 @@ repos:
       - id: mixed-line-ending
         args: [--fix=lf]
       - id: check-yaml
-        exclude: ^infra/helm/.*/templates/  # Helm templates are not plain YAML
+        exclude: ^infra/(helm|argocd)/.*/templates/  # Helm templates are not plain YAML (validated by helm.yml)
       - id: check-json
       - id: check-toml
       - id: check-merge-conflict

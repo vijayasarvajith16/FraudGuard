@@ -27,7 +27,7 @@ LOAD_ENV = test -f .env || { echo "No .env: run 'make env' first."; exit 1; }; s
 
 .PHONY: help env install hooks up down ps logs mongo-users test lint e2e test-integration gateway-test \
         ml-test ml-lint replay demo-samples secrets-scan clean-deps \
-        k8s-up k8s-status k8s-stop k8s-start k8s-down
+        k8s-up k8s-status k8s-argocd k8s-stop k8s-start k8s-down
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -127,11 +127,14 @@ secrets-scan: ## Scan the whole git history for secrets (gitleaks, .gitleaks.tom
 
 # Local cluster: kind + Traefik + the Helm charts in infra/helm (docs/kubernetes.md).
 # KIND_HTTP_PORT=8089 (ingress on 127.0.0.1); K8S_LOCAL_IMAGES=1 deploys locally built images.
-k8s-up: ## Create a kind cluster, install the ingress controller and deploy everything
+k8s-up: ## Create a kind cluster with Traefik and Argo CD; Argo CD deploys everything from Git
 	bash infra/kind/k8s.sh up
 
-k8s-status: ## Pods, ingress and the kind node's memory use
+k8s-status: ## Argo CD applications, pods, ingress and the kind node's memory use
 	bash infra/kind/k8s.sh status
+
+k8s-argocd: ## Open the Argo CD UI (port-forward to https://localhost:8443, prints the password)
+	bash infra/kind/k8s.sh argocd
 
 k8s-stop: ## Stop the kind node (keeps the cluster and its data)
 	bash infra/kind/k8s.sh stop

@@ -30,9 +30,10 @@ jobs:
   auth-service:
     uses: ./.github/workflows/_node-service.yml
     permissions:
-      contents: read
+      contents: write # the release job commits the image-tag bump (GitOps)
       packages: write
       security-events: write
     with:
       path: services/auth-service
       image: fraudguard-auth-service
+      values-file: infra/helm/values/values-auth-service.yaml

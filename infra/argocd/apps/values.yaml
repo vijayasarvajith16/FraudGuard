@@ -1,0 +1,33 @@
+# The Git source every Application follows. The root Application passes targetRevision, so the whole
+# tree can be pointed at a branch for testing without editing these manifests.
+repoURL: https://github.com/vijayasarvajith16/FraudGuard.git
+targetRevision: main
+namespace: fraudguard
+
+# Sync waves: Argo CD applies a wave only after the previous one is healthy (Application health is
+# enabled in argocd-cm, see infra/argocd/install/argocd-cm.yaml).
+#   -1  namespace (with its Pod Security labels)
+#    0  data stores
+#    1  backend services
+#    2  edge: gateway and frontend
+dataStores:
+  - name: mongodb
+    wave: 0
+  - name: rabbitmq
+    wave: 0
+
+services:
+  - name: auth-service
+    wave: 1
+  - name: quick-scan-service
+    wave: 1
+  - name: deep-scan-service
+    wave: 1
+  - name: transaction-service
+    wave: 1
+  - name: alerting-service
+    wave: 1
+  - name: api-gateway
+    wave: 2
+  - name: frontend
+    wave: 2

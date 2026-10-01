@@ -17,6 +17,11 @@ on:
         description: Semver of the service (from its manifest)
         required: true
         type: string
+      values-file:
+        description: Helm values file whose image.tag is bumped after a push to main (GitOps, docs/gitops.md); empty to skip
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -122,3 +127,60 @@ jobs:
             echo "$TAGS"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # GitOps release: point the service's Helm values at the image just published. Argo CD (which
+  # polls the repository) sees the commit and rolls it out; nobody runs kubectl. Commits made with
+  # the workflow token do not trigger further workflow runs, so this cannot loop.
+  release:
+    name: bump image tag in Git
+    needs: image
+    if: inputs.values-file != '' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write # this job only: commit the tag bump
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0 # the ancestry check below needs history
+          persist-credentials: true # the push below uses the workflow token
+
+      - name: Commit the new tag
+        env:
+          VALUES_FILE: ${{ inputs.values-file }}
+          SERVICE: ${{ inputs.image }}
+        run: |
+          new_tag="sha-${GITHUB_SHA}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3 4 5; do
+            git fetch -q origin main
+            git reset -q --hard origin/main
+            current="$(sed -nE 's/^  tag: (sha-[0-9a-f]{40})$/\1/p' "$VALUES_FILE")"
+            if [ -z "$current" ]; then
+              echo "::error::no '  tag: sha-<40 hex>' line in $VALUES_FILE"
+              exit 1
+            fi
+            if [ "$current" = "$new_tag" ]; then
+              echo "$VALUES_FILE already uses $new_tag"
+              exit 0
+            fi
+            # Never move a tag backwards: an older build that finishes last must not win.
+            if git merge-base --is-ancestor "$GITHUB_SHA" "${current#sha-}" 2>/dev/null; then
+              echo "$VALUES_FILE uses $current, which is newer than $GITHUB_SHA: nothing to do"
+              exit 0
+            fi
+            sed -i -E "s/^  tag: sha-[0-9a-f]{40}\$/  tag: ${new_tag}/" "$VALUES_FILE"
+            git add "$VALUES_FILE"
+            git commit -q -m "chore(release): ${SERVICE} ${new_tag:0:11}" \
+              -m "Image built from ${GITHUB_SHA} by the ${GITHUB_WORKFLOW} workflow (run ${GITHUB_RUN_ID}). Argo CD rolls it out."
+            if git push -q origin HEAD:main; then
+              echo "### Released ${SERVICE} ${new_tag}" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "push rejected (another release landed first); retry ${attempt}"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push the tag bump after 5 attempts"
+          exit 1

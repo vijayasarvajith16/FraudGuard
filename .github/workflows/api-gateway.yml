@@ -62,10 +62,11 @@ jobs:
     needs: verify
     uses: ./.github/workflows/_container-image.yml
     permissions:
-      contents: read
+      contents: write # the release job commits the tag bump
       packages: write
       security-events: write
     with:
       context: services/api-gateway
       image: fraudguard-api-gateway
       version: ${{ needs.verify.outputs.version }}
+      values-file: infra/helm/values/values-api-gateway.yaml

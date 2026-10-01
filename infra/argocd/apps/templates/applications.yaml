@@ -1,0 +1,10 @@
+{{- /* Wave -1: the namespace and its Pod Security labels. */ -}}
+{{ include "fraudguard.application" (dict "root" $ "name" "fraudguard-platform" "wave" -1 "path" "infra/argocd/platform" "helm" false) }}
+{{- range .Values.dataStores }}
+---
+{{ include "fraudguard.application" (dict "root" $ "name" .name "wave" .wave "path" (printf "infra/helm/%s" .name) "helm" true) }}
+{{- end }}
+{{- range .Values.services }}
+---
+{{ include "fraudguard.application" (dict "root" $ "name" .name "wave" .wave "path" "infra/helm/service" "helm" true "valueFiles" (list (printf "../values/values-%s.yaml" .name))) }}
+{{- end }}

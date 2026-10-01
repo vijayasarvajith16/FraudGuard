@@ -30,9 +30,10 @@ jobs:
   deep-scan-service:
     uses: ./.github/workflows/_python-service.yml
     permissions:
-      contents: read
+      contents: write # the release job commits the image-tag bump (GitOps)
       packages: write
       security-events: write
     with:
       path: services/deep-scan-service
       image: fraudguard-deep-scan-service
+      values-file: infra/helm/values/values-deep-scan-service.yaml
