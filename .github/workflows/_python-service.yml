@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: "3.13"
+      values-file:
+        description: Helm values file to bump after a push to main (GitOps); empty to skip
+        required: false
+        type: string
+        default: ""
       coverage-min:
         description: Minimum line coverage (percent)
         required: false
@@ -84,10 +89,11 @@ jobs:
     needs: verify
     uses: ./.github/workflows/_container-image.yml
     permissions:
-      contents: read
+      contents: write # the release job commits the tag bump
       packages: write
       security-events: write
     with:
       context: ${{ inputs.path }}
       image: ${{ inputs.image }}
       version: ${{ needs.verify.outputs.version }}
+      values-file: ${{ inputs.values-file }}

@@ -1,5 +1,6 @@
-# Helm charts and the kind setup: lint every chart with every service's values, render everything
-# and validate the manifests against the Kubernetes API schema (kubeconform, strict).
+# Helm charts, the kind setup and the Argo CD app-of-apps: lint every chart with every service's
+# values, render everything and validate the manifests against the Kubernetes API schema and the
+# Argo CD CRD schemas (kubeconform, strict).
 name: helm
 
 on:
@@ -8,12 +9,14 @@ on:
     paths:
       - infra/helm/**
       - infra/kind/**
+      - infra/argocd/**
       - .github/workflows/helm.yml
   pull_request:
     branches: [main]
     paths:
       - infra/helm/**
       - infra/kind/**
+      - infra/argocd/**
       - .github/workflows/helm.yml
   workflow_dispatch:
 
@@ -29,6 +32,8 @@ env:
   KUBECONFORM_VERSION: 0.8.0
   KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
   TRAEFIK_CHART_VERSION: 41.6.1 # keep in sync with infra/kind/k8s.sh
+  # Argo CD CRD schemas (Application, AppProject), pinned to a commit of the community catalog.
+  CRD_SCHEMAS: https://raw.githubusercontent.com/datreeio/CRDs-catalog/d373c2da9702bc9509a004db83e57263fe3bdfc1/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json
 
 jobs:
   charts:
@@ -57,6 +62,7 @@ jobs:
           done
           helm lint --strict infra/helm/mongodb
           helm lint --strict infra/helm/rabbitmq
+          helm lint --strict infra/argocd/apps
 
       - name: Render and validate
         run: |
@@ -67,8 +73,11 @@ jobs:
           done
           helm template mongodb infra/helm/mongodb -n fraudguard > rendered/mongodb.yaml
           helm template rabbitmq infra/helm/rabbitmq -n fraudguard > rendered/rabbitmq.yaml
-          cp infra/kind/namespace.yaml rendered/
-          kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION" rendered/
+          cp infra/argocd/platform/namespace.yaml rendered/
+          helm template fraudguard infra/argocd/apps > rendered/argocd-apps.yaml
+          cp infra/argocd/root.yaml rendered/argocd-root.yaml
+          kubeconform -strict -summary -kubernetes-version "$KUBERNETES_VERSION" \
+            -schema-location default -schema-location "$CRD_SCHEMAS" rendered/
 
       - name: Ingress controller values render against the pinned chart
         run: |

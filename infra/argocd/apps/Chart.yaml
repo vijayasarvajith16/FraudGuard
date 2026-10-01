@@ -1,0 +1,8 @@
+apiVersion: v2
+name: fraudguard-apps
+description: >-
+  App-of-apps for FraudGuard: renders the Argo CD AppProject and one Application per component
+  (namespace, MongoDB, RabbitMQ, seven services), all following targetRevision. Rendered by the root
+  Application (infra/argocd/root.yaml); see docs/gitops.md.
+type: application
+version: 0.1.0

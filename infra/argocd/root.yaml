@@ -1,0 +1,29 @@
+# The root of the app-of-apps: applied once by `make k8s-up`, then everything else comes from Git.
+# It renders infra/argocd/apps (the AppProject and one Application per component). targetRevision
+# appears twice: where the root reads the chart, and what it passes down to every child.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fraudguard
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: fraudguard
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/vijayasarvajith16/FraudGuard.git
+    targetRevision: main
+    path: infra/argocd/apps
+    helm:
+      parameters:
+        - name: targetRevision
+          value: main
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

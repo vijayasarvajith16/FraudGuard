@@ -1,8 +1,13 @@
 # Cloud demo environment (Terraform on Oracle Cloud Free Tier)
 
+> **Status: written and validated, never applied.** The project runs locally only (docker compose
+> and the kind cluster). The owner chose not to deploy to the internet or create a cloud account, so
+> `terraform apply` has not been run. CI checks the code on every change (`fmt`, `validate`,
+> Trivy, Checkov), and it is ready to use if a public environment is ever wanted.
+
 `infra/terraform/` provisions a public demo environment: one Ampere A1 (Arm) VM in its own VCN,
-bootstrapped with **k3s** (Traefik ingress) and **Argo CD**. Argo CD deploys FraudGuard onto it in
-Phase 12. Daily development stays on docker compose, and the local Kubernetes target stays kind
+bootstrapped with **k3s** (Traefik ingress) and **Argo CD**. Argo CD would deploy FraudGuard onto it
+the same way it does on the local kind cluster (docs/gitops.md). Daily development stays on docker compose, and the local Kubernetes target stays kind
 (docs/kubernetes.md).
 
 ```
@@ -126,6 +131,6 @@ terraform destroy                 # deletes the VM, its boot volume and the whol
 
 ## Arm images
 
-A1 VMs are Arm (aarch64). k3s, Traefik and Argo CD publish Arm images; FraudGuard's own images
-must too. CI builds linux/amd64 today, and adds linux/arm64 in Phase 12 before Argo CD deploys
-the app here.
+A1 VMs are Arm (aarch64). k3s, Traefik and Argo CD publish Arm images; FraudGuard's own images are
+built for linux/amd64 only (the local kind cluster). Using this environment would first need
+linux/arm64 builds in CI (GitHub's native `ubuntu-24.04-arm` runners).
