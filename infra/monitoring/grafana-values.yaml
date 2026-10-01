@@ -69,7 +69,11 @@ initChownData:
 testFramework:
   enabled: false
 
-# Grafana 13 settles at ~245 MiB here.
+# Grafana 13 idles at ~250 MiB and needs ~400 MiB while rendering the dashboards. The chart sets
+# GOMEMLIMIT to a share of the memory limit (default 60%); with a 384Mi limit that was 230 MiB, below
+# the live heap, so the Go garbage collector ran nonstop, pinned the CPU limit and failed the probes.
 resources:
-  requests: { cpu: 50m, memory: 256Mi }
-  limits: { cpu: 500m, memory: 384Mi }
+  requests: { cpu: 50m, memory: 320Mi }
+  limits: { cpu: "1", memory: 768Mi }
+goMemLimit:
+  factor: 0.85 # GOMEMLIMIT ~650 MiB: collect harder only close to the container limit
