@@ -1,0 +1,58 @@
+# Prometheus for the local cluster (chart prometheus-community/prometheus, deployed by Argo CD).
+# Lightweight on purpose: the Prometheus server plus kube-state-metrics, short retention, no
+# persistent volume, and no alertmanager, node-exporter or pushgateway. Alert rules: alert-rules.yaml
+# (a second values file, unit-tested with promtool in tests/monitoring/).
+
+server:
+  global:
+    scrape_interval: 15s
+    evaluation_interval: 15s
+  retention: 2d
+  retentionSize: 1GB
+  persistentVolume:
+    enabled: false # emptyDir: a restart starts the 2-day window over, fine for a local demo
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 768Mi }
+
+alertmanager:
+  enabled: false # rules still evaluate and show as firing in Prometheus and Grafana
+prometheus-node-exporter:
+  enabled: false # one kind node; container metrics come from the kubelet's cAdvisor
+prometheus-pushgateway:
+  enabled: false
+
+kube-state-metrics:
+  enabled: true # deployment availability (ServiceDown) and HPA replica counts
+  resources:
+    requests: { cpu: 10m, memory: 32Mi }
+    limits: { cpu: 200m, memory: 128Mi }
+
+# Scrape jobs (the chart's built-ins, keyed by name):
+# - kubernetes-pods: every pod with prometheus.io/* annotations. The service chart sets them on all
+#   FraudGuard services, and the rabbitmq chart on the broker (per-queue depth, with the family
+#   parameter from prometheus.io/param_family).
+# - kubernetes-service-endpoints: kube-state-metrics.
+# - kubernetes-nodes-cadvisor: per-container CPU and memory, trimmed to the series the dashboards use.
+# The API server and kubelet jobs are off: thousands of series nobody here looks at.
+scrapeConfigs:
+  kubernetes-api-servers:
+    enabled: false
+  kubernetes-nodes:
+    enabled: false
+  kubernetes-service-endpoints-slow:
+    enabled: false
+  kubernetes-pods-slow:
+    enabled: false
+  kubernetes-services:
+    enabled: false # blackbox probes; no blackbox exporter here
+  prometheus-pushgateway:
+    enabled: false
+  kubernetes-nodes-cadvisor:
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: container_cpu_usage_seconds_total|container_cpu_cfs_throttled_periods_total|container_cpu_cfs_periods_total|container_memory_working_set_bytes
+        action: keep
+      - source_labels: [namespace]
+        regex: fraudguard|monitoring
+        action: keep

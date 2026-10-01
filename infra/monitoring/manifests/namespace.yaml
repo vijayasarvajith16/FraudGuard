@@ -1,0 +1,11 @@
+# The monitoring namespace (Prometheus, Grafana, prometheus-adapter). Pod Security: "baseline" is
+# enforced and "restricted" warned and audited; the upstream charts' pods run as non-root.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    app.kubernetes.io/part-of: fraudguard
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

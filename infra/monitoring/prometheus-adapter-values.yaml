@@ -1,0 +1,30 @@
+# prometheus-adapter (chart prometheus-community/prometheus-adapter, deployed by Argo CD): serves
+# RabbitMQ queue depth from Prometheus on the Kubernetes external metrics API, for deep-scan's
+# HorizontalPodAutoscaler (infra/helm/values/values-deep-scan-service.yaml). CPU and memory for
+# quick-scan's autoscaler come from metrics-server, so the adapter's resource and custom rules are off.
+
+prometheus:
+  url: http://prometheus-server.monitoring.svc.cluster.local
+  port: 80
+
+# How often the adapter re-lists series from Prometheus (a new queue appears within this interval).
+metricsRelistInterval: 1m
+
+rules:
+  default: false
+  external:
+    # rabbitmq_detailed_queue_messages_ready{namespace, queue, vhost} -> the external metric
+    # rabbitmq_queue_messages_ready, queried by the HPA in its own namespace with a queue selector:
+    #   external.metrics.k8s.io/v1beta1/namespaces/fraudguard/rabbitmq_queue_messages_ready?labelSelector=queue=transactions.flagged
+    - seriesQuery: 'rabbitmq_detailed_queue_messages_ready{namespace!="",queue!=""}'
+      resources:
+        overrides:
+          namespace: { resource: namespace }
+      name:
+        matches: ^rabbitmq_detailed_queue_messages_ready$
+        as: rabbitmq_queue_messages_ready
+      metricsQuery: sum(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)
+
+resources:
+  requests: { cpu: 20m, memory: 64Mi }
+  limits: { cpu: 200m, memory: 128Mi }

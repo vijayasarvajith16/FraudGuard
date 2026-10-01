@@ -1,0 +1,23 @@
+# Rendered by the monitoring-manifests Argo CD Application (infra/argocd/apps): the monitoring
+# namespace and the Grafana dashboards. Grafana's sidecar loads every ConfigMap labeled
+# grafana_dashboard in its namespace; a changed dashboard JSON is live within a minute of the merge.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+
+resources:
+  - namespace.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true # stable names: Argo CD prunes a removed dashboard by name
+  labels:
+    grafana_dashboard: "1"
+    app.kubernetes.io/part-of: fraudguard
+
+configMapGenerator:
+  - name: dashboard-fraudguard-overview
+    files:
+      - dashboards/fraudguard-overview.json
+  - name: dashboard-fraudguard-autoscaling
+    files:
+      - dashboards/fraudguard-autoscaling.json

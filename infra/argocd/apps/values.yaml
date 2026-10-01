@@ -6,8 +6,9 @@ namespace: fraudguard
 
 # Sync waves: Argo CD applies a wave only after the previous one is healthy (Application health is
 # enabled in argocd-cm, see infra/argocd/install/argocd-cm.yaml).
-#   -1  namespace (with its Pod Security labels)
-#    0  data stores
+#   -2  AppProjects
+#   -1  namespaces (with their Pod Security labels), Grafana dashboards
+#    0  data stores; monitoring and the metrics APIs (before the autoscalers in wave 1)
 #    1  backend services
 #    2  edge: gateway and frontend
 dataStores:
@@ -31,3 +32,37 @@ services:
     wave: 2
   - name: frontend
     wave: 2
+
+# Monitoring and autoscaling add-ons (infra/monitoring, docs/monitoring.md): upstream Helm charts at a
+# pinned version, each with values files from infra/monitoring in this repository (multi-source
+# Applications). AppProject "platform". The monitoring namespace and the Grafana dashboards come from
+# infra/monitoring/manifests (kustomize).
+monitoring:
+  namespace: monitoring
+  manifestsWave: -1
+  charts:
+    - name: metrics-server # pod CPU for quick-scan's autoscaler, `kubectl top`
+      namespace: kube-system
+      wave: 0
+      repoURL: https://kubernetes-sigs.github.io/metrics-server/
+      chart: metrics-server
+      version: 3.14.0
+      valueFiles: [metrics-server-values.yaml]
+    - name: prometheus # with kube-state-metrics; alert rules in a second values file
+      wave: 0
+      repoURL: https://prometheus-community.github.io/helm-charts
+      chart: prometheus
+      version: 29.35.0
+      valueFiles: [prometheus-values.yaml, alert-rules.yaml]
+    - name: prometheus-adapter # RabbitMQ queue depth for deep-scan's autoscaler
+      wave: 0
+      repoURL: https://prometheus-community.github.io/helm-charts
+      chart: prometheus-adapter
+      version: 5.3.0
+      valueFiles: [prometheus-adapter-values.yaml]
+    - name: grafana
+      wave: 0
+      repoURL: https://grafana-community.github.io/helm-charts
+      chart: grafana
+      version: 13.2.7
+      valueFiles: [grafana-values.yaml]

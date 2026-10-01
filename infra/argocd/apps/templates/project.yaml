@@ -28,3 +28,37 @@ spec:
       kind: StatefulSet
     - group: networking.k8s.io
       kind: Ingress
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+---
+# Cluster add-ons for monitoring and autoscaling: the pinned upstream charts plus this repository
+# (values files and manifests), deployed only into the monitoring namespace and kube-system.
+# They need cluster-wide read access (RBAC) and register the metrics APIs (APIService).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: platform
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  description: Monitoring (Prometheus, Grafana) and the metrics APIs for autoscaling
+  sourceRepos:
+    - {{ .Values.repoURL }}
+    {{- range .Values.monitoring.charts }}
+    - {{ .repoURL }}
+    {{- end }}
+  destinations:
+    - server: https://kubernetes.default.svc
+      namespace: {{ .Values.monitoring.namespace }}
+    - server: https://kubernetes.default.svc
+      namespace: kube-system
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+    - group: apiregistration.k8s.io
+      kind: APIService

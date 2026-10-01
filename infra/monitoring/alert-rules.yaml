@@ -1,0 +1,151 @@
+# Prometheus alert rules, as a second values file for the prometheus chart (rendered verbatim into
+# the server's alerting_rules.yml). Unit tests: tests/monitoring/alert-rules.test.yaml, run with
+# `make test-monitoring` (promtool). There is no Alertmanager in this local setup: firing alerts are
+# visible in Prometheus (/alerts) and on the Grafana overview dashboard.
+#
+# Label conventions (infra/monitoring/prometheus-values.yaml): pods are scraped through their
+# prometheus.io annotations, so every series carries namespace, pod and the pod's labels, e.g.
+# app_kubernetes_io_name="quick-scan-service". RabbitMQ series also carry queue and vhost.
+serverFiles:
+  alerting_rules.yml:
+    groups:
+      - name: fraudguard.availability
+        rules:
+          # kube-state-metrics sees a Deployment or StatefulSet with nothing available, including
+          # when every pod is gone (the pods' own `up` series would just disappear).
+          - alert: ServiceDown
+            expr: |
+              kube_deployment_status_replicas_available{namespace="fraudguard"} == 0
+                or
+              kube_statefulset_status_replicas_ready{namespace="fraudguard"} == 0
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "{{ $labels.deployment }}{{ $labels.statefulset }} has no available pods"
+              description: "No ready replica for 2 minutes. Check `kubectl -n fraudguard get pods` and the pod events."
+
+          # A single pod whose /metrics cannot be scraped (crashing, hung, or not serving yet).
+          - alert: ScrapeTargetDown
+            expr: up{namespace="fraudguard"} == 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $labels.pod }} has not answered /metrics for 5 minutes"
+              description: "Prometheus cannot scrape {{ $labels.instance }} ({{ $labels.app_kubernetes_io_name }})."
+
+      - name: fraudguard.queues
+        rules:
+          # deep-scan autoscales at 20 waiting messages per pod (max 3 pods); a backlog that stays
+          # above 100 means the consumers are saturated or stuck.
+          - alert: QueueLagHigh
+            expr: |
+              max by (queue) (
+                rabbitmq_detailed_queue_messages_ready{queue=~"transactions\\.(flagged|scored)"}
+              ) > 100
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $labels.queue }} has {{ $value }} messages waiting"
+              description: "More than 100 ready messages for 2 minutes: flagged transactions wait longer for a verdict."
+
+          # Time from a flagged event to its acknowledged verdict (deep-scan side).
+          - alert: DeepScanVerdictDelayed
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le) (rate(queue_processing_latency_seconds_bucket{app_kubernetes_io_name="deep-scan-service"}[5m]))
+              ) > 10
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Flagged transactions wait {{ $value | humanizeDuration }} (p95) for a deep-scan verdict"
+              description: "p95 from transaction.flagged to its acknowledged score is above 10 s."
+
+          - alert: DeadLetterQueueNotEmpty
+            expr: max by (queue) (rabbitmq_detailed_queue_messages{queue=~".+\\.dlq"}) > 0
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $labels.queue }} holds {{ $value }} dead-lettered messages"
+              description: "Messages exhausted their retries or failed permanently; inspect them in the RabbitMQ UI."
+
+      - name: fraudguard.latency
+        rules:
+          # Contract §4: scoring p95 < 20 ms in-process (scan_latency_seconds excludes HTTP).
+          - alert: QuickScanLatencySLOBreach
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le) (rate(scan_latency_seconds_bucket{app_kubernetes_io_name="quick-scan-service"}[5m]))
+              ) > 0.02
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "quick-scan scoring p95 is {{ $value | humanizeDuration }} (SLO 20 ms)"
+              description: "Every transfer waits for quick-scan. Check CPU throttling and the autoscaler."
+
+          - alert: DeepScanLatencySLOBreach
+            expr: |
+              histogram_quantile(0.95,
+                sum by (le) (rate(scan_latency_seconds_bucket{app_kubernetes_io_name="deep-scan-service"}[5m]))
+              ) > 0.02
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "deep-scan scoring p95 is {{ $value | humanizeDuration }} (SLO 20 ms)"
+              description: "deep-scan is off the request path, but slow scoring builds a queue backlog."
+
+      - name: fraudguard.errors
+        rules:
+          # 5xx share of API requests per service (health and metrics endpoints excluded), only
+          # with enough traffic for the ratio to mean something.
+          - alert: HighErrorRate
+            expr: |
+              (
+                sum by (app_kubernetes_io_name) (rate(http_requests_total{namespace="fraudguard", status=~"5..", route!~"/health.*|/metrics"}[5m]))
+                /
+                sum by (app_kubernetes_io_name) (rate(http_requests_total{namespace="fraudguard", route!~"/health.*|/metrics"}[5m]))
+              ) > 0.05
+              and
+              sum by (app_kubernetes_io_name) (rate(http_requests_total{namespace="fraudguard", route!~"/health.*|/metrics"}[5m])) > 0.1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $labels.app_kubernetes_io_name }}: {{ $value | humanizePercentage }} of requests fail with 5xx"
+              description: "More than 5% server errors for 5 minutes."
+
+          # A failed or timed-out quick-scan call sends the transfer to review (contract §2.3): safe,
+          # but it floods deep-scan and delays every user.
+          - alert: QuickScanCallsFailing
+            expr: |
+              sum(rate(quick_scan_calls_total{result=~"timeout|error"}[5m]))
+                / sum(rate(quick_scan_calls_total[5m]))
+              > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "{{ $value | humanizePercentage }} of quick-scan calls time out or fail"
+              description: "Affected transfers go to deep-scan review instead of instant approval."
+
+      - name: fraudguard.risk
+        rules:
+          # At least 5 CRITICAL verdicts in 10 minutes, and more than 3x the rate of the 6 hours
+          # before (a zero baseline counts as 0, so a first burst fires too).
+          - alert: CriticalTierSpike
+            expr: |
+              sum(increase(risk_tier_total{tier="CRITICAL"}[10m])) >= 5
+              and
+              sum(rate(risk_tier_total{tier="CRITICAL"}[10m]))
+                > 3 * (sum(rate(risk_tier_total{tier="CRITICAL"}[6h] offset 10m)) or vector(0))
+            labels:
+              severity: critical
+            annotations:
+              summary: "{{ $value | humanize }} CRITICAL verdicts in the last 10 minutes"
+              description: "A burst of CRITICAL risk tiers (accounts frozen). Check the admin review queue for a fraud campaign or a bad model."
