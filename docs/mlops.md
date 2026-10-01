@@ -60,7 +60,9 @@ The evaluation job has no secrets: the registry allows anonymous reads.
 The `promote` job runs only for a "promote" decision on `main`. It uses the GitHub environment
 **`model-registry`**, which requires a reviewer's approval: GitHub notifies the reviewer, and the job
 waits (scheduled runs too) until someone approves it on the run page. Only this job sees the registry
-token. It then:
+token. Its first step refuses to go on unless the environment really has a required-reviewers rule
+and the token: GitHub creates a missing environment without any protection, so a promotion could
+otherwise start unapproved. It then:
 
 1. **Pins the versions in Git**: `promote.py pin-values` rewrites the `MODEL_URI` line of
    `infra/helm/values/values-quick-scan-service.yaml` and `values-deep-scan-service.yaml` (for example
