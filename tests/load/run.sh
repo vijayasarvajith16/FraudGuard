@@ -4,7 +4,7 @@
 #   PROFILE=backlog  steady load plus a deep-scan outage; the queue-depth autoscaler drains it
 #   PROFILE=quick-scan  quick-scan's /score alone (component test of its CPU autoscaler)
 #   PROFILE=smoke    one minute of light load (checks the pipeline)
-#   LOAD_PODS=8      k6 pods (the gateway allows each client IP 20 requests/s)
+#   LOAD_PODS=4      k6 pods (the gateway allows each client IP 20 requests/s)
 # k6 runs inside the cluster as an indexed Job and pushes its metrics to Prometheus. A watcher
 # records every autoscaler change with a timestamp, and report.py turns both into the results in
 # tests/load/results/<run>/ (gitignored). Needs tests/load/data/rows.json (make load-rows).
@@ -12,7 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 PROFILE="${PROFILE:-ramp}"
-PODS="${LOAD_PODS:-8}"
+PODS="${LOAD_PODS:-4}"
 PYTHON="${PYTHON:-python3}"
 CTX=kind-fraudguard
 NODE=fraudguard-control-plane
@@ -138,14 +138,15 @@ watch_autoscalers() {
   declare -A last=()
   local name current desired ready state
   while [ ! -f "$OUT/.stop" ]; do
-    while read -r name current desired; do
+    # The metric is what the autoscaler itself last read: CPU % of request, or waiting messages per pod.
+    while read -r name current desired metric; do
       ready="$(k -n "$NS" get deploy "$name" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
       state="current=${current:-0} desired=${desired:-0} ready=${ready:-0}"
       if [ "${last[$name]:-}" != "$state" ]; then
-        echo "$(date +%s) hpa ${name} ${state}" >> "$EVENTS"
+        echo "$(date +%s) hpa ${name} ${state} metric=${metric:-}" >> "$EVENTS"
         last[$name]="$state"
       fi
-    done < <(k -n "$NS" get hpa -o jsonpath='{range .items[*]}{.metadata.name} {.status.currentReplicas} {.status.desiredReplicas}{"\n"}{end}')
+    done < <(k -n "$NS" get hpa -o jsonpath='{range .items[*]}{.metadata.name} {.status.currentReplicas} {.status.desiredReplicas} {.status.currentMetrics[0].resource.current.averageUtilization}{.status.currentMetrics[0].external.current.averageValue}{"\n"}{end}')
     sleep 2
   done
 }
