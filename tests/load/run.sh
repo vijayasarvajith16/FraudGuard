@@ -27,7 +27,7 @@ sleep_until() { while [ "$(date +%s)" -lt "$1" ] && [ ! -f "$OUT/.stop" ]; do sl
 
 [ -f "$PROFILE_FILE" ] || { echo "error: no profile $PROFILE_FILE"; exit 1; }
 [ -f "$ROWS" ] || { echo "error: no $ROWS (run 'make load-rows' first)"; exit 1; }
-k get --raw /readyz >/dev/null || { echo "error: the kind cluster is not reachable (make k8s-up)"; exit 1; }
+k get nodes >/dev/null || { echo "error: the kind cluster is not reachable (make k8s-up)"; exit 1; }
 
 RUN_ID="$(date +%Y%m%d%H%M%S)"
 OUT="tests/load/results/${RUN_ID}-${PROFILE}"
