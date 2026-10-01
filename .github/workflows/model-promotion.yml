@@ -1,0 +1,242 @@
+# Model promotion, the MLOps loop (docs/mlops.md). Evaluates the registered candidate models on the
+# held-out test split; if they pass every floor and do not regress against production, a human
+# approves the promotion, the version is pinned in the scan services' Helm values (Argo CD rolls
+# them out) and the `production` alias moves in MLflow.
+name: model-promotion
+
+on:
+  schedule:
+    - cron: "17 5 * * *" # daily: a new @candidate from Colab is evaluated within a day
+  workflow_dispatch:
+    inputs:
+      quick_version:
+        description: quick-scan version to evaluate (empty = @candidate)
+        required: false
+        default: ""
+      deep_version:
+        description: deep-scan version to evaluate (empty = @candidate)
+        required: false
+        default: ""
+      allow_regression:
+        description: Deliberate rollback - skip the comparison with production (the floors still apply)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One promotion at a time; a queued run waits instead of racing.
+concurrency:
+  group: model-promotion
+  cancel-in-progress: false
+
+env:
+  # Public registry: reading needs no token. Only the promote job gets one (environment secrets).
+  MLFLOW_TRACKING_URI: https://dagshub.com/vijayasarvajith16/fraudguard.mlflow
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+  # Kaggle Credit Card Fraud (ODbL), as published for the TensorFlow tutorials: the same bytes as
+  # Kaggle's file. Pinned by SHA-256, the hash every registered model version is tagged with.
+  DATASET_URL: https://storage.googleapis.com/download.tensorflow.org/data/creditcard.csv
+  DATASET_SHA256: 76274b691b16a6c49d3f159c883398e03ccd6d1ee12d9d8ee38f4b4b98551a89
+  # Floors on the test split (docs/ml-results.md; the same as the Colab notebook).
+  MIN_RECALL: "0.75"
+  MIN_PR_AUC: "0.78"
+  MIN_PRECISION: "0.85"
+
+jobs:
+  evaluate:
+    name: evaluate candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      decision: ${{ steps.decide.outputs.decision || 'none' }}
+      quick: ${{ steps.resolve.outputs.quick_candidate }}
+      deep: ${{ steps.resolve.outputs.deep_candidate }}
+      report: ${{ steps.decide.outputs.report }}
+    defaults:
+      run:
+        working-directory: ml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13" # the Colab runtime the models are trained on
+          cache: pip
+          cache-dependency-path: ml/requirements.txt
+
+      - name: Install the registry client
+        run: |
+          python -m pip install --disable-pip-version-check \
+            "$(sed -n 's/^mlflow==/mlflow-skinny==/p' requirements.txt)"
+
+      - name: Resolve the versions
+        id: resolve
+        env:
+          QUICK: ${{ inputs.quick_version }}
+          DEEP: ${{ inputs.deep_version }}
+        run: |
+          args=()
+          if [ -n "$QUICK" ]; then args+=(--quick "$QUICK"); fi
+          if [ -n "$DEEP" ]; then args+=(--deep "$DEEP"); fi
+          python src/promote.py resolve "${args[@]}" --github-output "$GITHUB_OUTPUT"
+
+      - name: Nothing to promote
+        if: steps.resolve.outputs.same == 'true'
+        env:
+          QUICK: ${{ steps.resolve.outputs.quick_candidate }}
+          DEEP: ${{ steps.resolve.outputs.deep_candidate }}
+        run: |
+          echo "### Model promotion: nothing to do" >> "$GITHUB_STEP_SUMMARY"
+          echo "quick-scan v${QUICK} and deep-scan v${DEEP} are already in production." >> "$GITHUB_STEP_SUMMARY"
+
+      # Any failure here stops the run: curl --fail on HTTP errors, then the checksum must match
+      # exactly, and only a verified file gets the name evaluate.py reads. evaluate.py checks the
+      # hash again (--expect-sha256) and against the models' training data.
+      - name: Download the dataset (checksum-verified)
+        if: steps.resolve.outputs.same != 'true'
+        run: |
+          mkdir -p data
+          curl --fail --silent --show-error --location --retry 3 --retry-all-errors \
+            -o data/creditcard.csv.part "$DATASET_URL"
+          echo "${DATASET_SHA256}  data/creditcard.csv.part" | sha256sum --check --strict
+          mv data/creditcard.csv.part data/creditcard.csv
+
+      - name: Install the evaluation pipeline (CPU-only XGBoost, same release)
+        if: steps.resolve.outputs.same != 'true'
+        run: |
+          sed 's/^xgboost==/xgboost-cpu==/' requirements.txt > "$RUNNER_TEMP/requirements-ci.txt"
+          python -m pip install --disable-pip-version-check -r "$RUNNER_TEMP/requirements-ci.txt"
+
+      - name: Evaluate the candidate against the floors
+        if: steps.resolve.outputs.same != 'true'
+        env:
+          QUICK: ${{ steps.resolve.outputs.quick_candidate }}
+          DEEP: ${{ steps.resolve.outputs.deep_candidate }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/reports"
+          status=0
+          python src/evaluate.py --data data/creditcard.csv --expect-sha256 "$DATASET_SHA256" \
+            --quick-model "models:/fraudguard-quick-scan/${QUICK}" \
+            --deep-model "models:/fraudguard-deep-scan/${DEEP}" \
+            --min-recall "$MIN_RECALL" --min-pr-auc "$MIN_PR_AUC" --min-precision "$MIN_PRECISION" \
+            --output "$RUNNER_TEMP/reports/candidate.json" || status=$?
+          # 0 = every floor passed, 1 = a floor failed (the decision below rejects the candidate).
+          # Anything else is an error (dataset, registry, model) and stops the run here.
+          if [ "$status" -gt 1 ]; then exit "$status"; fi
+
+      - name: Evaluate production for comparison
+        if: steps.resolve.outputs.same != 'true' && steps.resolve.outputs.has_production == 'true'
+        env:
+          QUICK: ${{ steps.resolve.outputs.quick_production }}
+          DEEP: ${{ steps.resolve.outputs.deep_production }}
+        run: |
+          python src/evaluate.py --data data/creditcard.csv --expect-sha256 "$DATASET_SHA256" \
+            --quick-model "models:/fraudguard-quick-scan/${QUICK}" \
+            --deep-model "models:/fraudguard-deep-scan/${DEEP}" \
+            --output "$RUNNER_TEMP/reports/production.json"
+
+      - name: Decide
+        id: decide
+        if: steps.resolve.outputs.same != 'true'
+        env:
+          HAS_PRODUCTION: ${{ steps.resolve.outputs.has_production }}
+          ALLOW_REGRESSION: ${{ inputs.allow_regression }}
+        run: |
+          args=(--candidate "$RUNNER_TEMP/reports/candidate.json")
+          if [ "$HAS_PRODUCTION" = true ]; then args+=(--production "$RUNNER_TEMP/reports/production.json"); fi
+          if [ "$ALLOW_REGRESSION" = true ]; then args+=(--allow-regression); fi
+          python src/promote.py decide "${args[@]}" --summary "$GITHUB_STEP_SUMMARY" --github-output "$GITHUB_OUTPUT"
+          # The headline metrics travel to the promote job, which records them on the versions.
+          python -c 'import json, sys; r = json.load(open(sys.argv[1])); print("report=" + json.dumps({"headline": r["headline"], "dataset_sha256": r["dataset_sha256"]}))' \
+            "$RUNNER_TEMP/reports/candidate.json" >> "$GITHUB_OUTPUT"
+
+      - name: Keep the evaluation reports
+        if: always() && steps.resolve.outputs.same != 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: evaluation-reports
+          path: ${{ runner.temp }}/reports/
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: A rejected candidate fails a manual run
+        if: steps.decide.outputs.decision == 'reject'
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "::error::the candidate was rejected (reasons in the job summary)"
+            exit 1
+          fi
+          echo "::warning::the candidate was rejected; scheduled runs re-check until a new candidate is registered"
+
+  promote:
+    name: promote (requires approval)
+    needs: evaluate
+    if: needs.evaluate.outputs.decision == 'promote' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # The environment holds the registry write token and requires a reviewer's approval before
+    # this job starts (docs/mlops.md, one-time setup).
+    environment: model-registry
+    permissions:
+      contents: write # this job only: commit the version pin
+    env:
+      QUICK: ${{ needs.evaluate.outputs.quick }}
+      DEEP: ${{ needs.evaluate.outputs.deep }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: true # the push below uses the workflow token
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install the registry client
+        run: |
+          python -m pip install --disable-pip-version-check \
+            "$(sed -n 's/^mlflow==/mlflow-skinny==/p' ml/requirements.txt)"
+
+      # Git first: the cluster follows Git. If the alias update below then failed, the next run
+      # would see candidate != production again and finish the job (both steps are idempotent).
+      - name: Pin the versions in the Helm values
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          for attempt in 1 2 3 4 5; do
+            git fetch -q origin main
+            git reset -q --hard origin/main
+            python ml/src/promote.py pin-values --quick "$QUICK" --deep "$DEEP"
+            if git diff --quiet; then
+              echo "The values already pin quick-scan v${QUICK} and deep-scan v${DEEP}."
+              exit 0
+            fi
+            git add infra/helm/values/values-quick-scan-service.yaml infra/helm/values/values-deep-scan-service.yaml
+            git commit -q -m "chore(model): promote quick-scan v${QUICK}, deep-scan v${DEEP}" \
+              -m "Evaluated and approved in the ${GITHUB_WORKFLOW} workflow (run ${GITHUB_RUN_ID}). Argo CD rolls both scan services."
+            if git push -q origin HEAD:main; then
+              echo "### Pinned quick-scan v${QUICK} and deep-scan v${DEEP} in Git ($(git rev-parse --short HEAD))" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "push rejected (another commit landed first); retry ${attempt}"
+            sleep $((attempt * 5))
+          done
+          echo "::error::could not push the version pin after 5 attempts"
+          exit 1
+
+      - name: Move the production alias
+        env:
+          MLFLOW_TRACKING_USERNAME: ${{ secrets.MLFLOW_TRACKING_USERNAME }}
+          MLFLOW_TRACKING_PASSWORD: ${{ secrets.MLFLOW_TRACKING_PASSWORD }}
+          REPORT: ${{ needs.evaluate.outputs.report }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          printf '%s' "$REPORT" > "$RUNNER_TEMP/candidate.json"
+          python ml/src/promote.py apply --quick "$QUICK" --deep "$DEEP" \
+            --report "$RUNNER_TEMP/candidate.json" --run-url "$RUN_URL"
+          echo "@production -> quick-scan v${QUICK}, deep-scan v${DEEP}" >> "$GITHUB_STEP_SUMMARY"
