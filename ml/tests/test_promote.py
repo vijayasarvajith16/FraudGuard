@@ -12,13 +12,15 @@ from common import CANDIDATE_ALIAS, DEEP_SCAN_MODEL_NAME, PRODUCTION_ALIAS, QUIC
 FLOORS = {"min_recall": 0.75, "min_pr_auc": 0.78, "min_precision": 0.85}
 
 
-def report(recall=0.80, precision=0.90, pr_auc=0.82, passed=True, floors=FLOORS, quick="3", deep="3", sha="abc"):
+def report(
+    recall=0.80, precision=0.90, pr_auc=0.82, passed=True, floors=FLOORS, quick="3", deep="3", sha="abc", traffic=6.1
+):
     return {
         "headline": {"recall": recall, "precision": precision, "pr_auc": pr_auc},
         "gates": {**floors, "passed": passed, "failures": [] if passed else ["recall 0.70 < 0.75"]},
         "quick_scan": {"model": f"models:/{QUICK_SCAN_MODEL_NAME}/{quick}"},
         "deep_scan": {"model": f"models:/{DEEP_SCAN_MODEL_NAME}/{deep}"},
-        "cascade": {"deep_scan_traffic_pct": 6.1},
+        "cascade": {"deep_scan_traffic_pct": traffic},
         "dataset_sha256": sha,
     }
 
@@ -138,6 +140,43 @@ def test_decide_rejects_reports_from_different_datasets():
 
 def test_decide_without_production_needs_only_the_floors():
     assert promote.decide(report(), None, 0.01, False).promote
+
+
+def test_decide_rejects_more_deep_scan_traffic_without_a_recall_gain():
+    # The first real promotion: quick-scan v3 flagged 10.2% instead of 6.1%, with identical results.
+    production = report(recall=0.7789, quick="2", deep="2", traffic=6.10)
+    d = promote.decide(report(recall=0.7789, traffic=10.21), production, 0.01, False)
+    assert not d.promote
+    assert d.reasons[0].startswith("cost: deep-scan traffic 6.10% -> 10.21%")
+
+
+def test_decide_accepts_more_traffic_that_buys_recall_or_stays_small():
+    production = report(recall=0.78, quick="2", deep="2", traffic=6.1)
+    assert promote.decide(report(recall=0.80, traffic=10.2), production, 0.01, False).promote  # +0.02 recall
+    assert promote.decide(report(recall=0.78, traffic=6.9), production, 0.01, False).promote  # +0.8 points only
+
+
+def test_decide_accepts_a_rollback_to_a_cheaper_model():
+    production = report(recall=0.7789, quick="3", deep="3", traffic=10.21)
+    assert promote.decide(report(recall=0.7789, quick="2", deep="2", traffic=6.10), production, 0.01, False).promote
+
+
+def test_allow_regression_also_skips_the_cost_check():
+    production = report(recall=0.78, quick="2", deep="2", traffic=6.1)
+    assert promote.decide(report(recall=0.78, traffic=12.0), production, 0.01, True).promote
+
+
+def test_decide_cli_takes_the_cost_limits(tmp_path):
+    candidate, production = tmp_path / "c.json", tmp_path / "p.json"
+    candidate.write_text(json.dumps(report(recall=0.78, traffic=8.0)))
+    production.write_text(json.dumps(report(recall=0.78, quick="2", deep="2", traffic=6.0)))
+    out = tmp_path / "out.txt"
+    args = ["decide", "--candidate", str(candidate), "--production", str(production), "--github-output", str(out)]
+    assert promote.main(args) == 0
+    assert out.read_text() == "decision=reject\n"
+    out.unlink()
+    assert promote.main([*args, "--max-traffic-increase", "3"]) == 0
+    assert out.read_text() == "decision=promote\n"
 
 
 def test_decide_cli_writes_the_decision_and_a_summary(tmp_path):
