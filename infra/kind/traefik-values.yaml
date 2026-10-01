@@ -4,6 +4,15 @@
 deployment:
   replicas: 1
 
+# Traefik holds host port 80 on the single node, so a new pod cannot start while the old one runs:
+# the chart's default surge-first rollout (maxSurge 1, maxUnavailable 0) deadlocks with the new pod
+# Pending forever. Stop the old pod first; an upgrade costs a few seconds of ingress downtime.
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+    maxSurge: 0
+
 # Run on the node that kind maps to the host (infra/kind/kind-config.yaml: ingress-ready=true, and
 # host 127.0.0.1:${KIND_HTTP_PORT} -> node port 80).
 nodeSelector:
@@ -31,6 +40,14 @@ ingressClass:
 providers:
   kubernetesIngress:
     enabled: true
+    # Report where the ingress answers (kind maps it to 127.0.0.1) in each Ingress's status. Argo CD
+    # treats an Ingress without a status address as still Progressing, which would hold back the
+    # gateway and frontend Applications. publishedService would copy the address of Traefik's own
+    # Service, which (ClusterIP) has none.
+    publishedService:
+      enabled: false
+    ingressEndpoint:
+      ip: 127.0.0.1
   kubernetesCRD:
     enabled: false # only standard Ingress objects are used
 

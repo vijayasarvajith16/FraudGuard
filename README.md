@@ -29,7 +29,8 @@ How the pipelines work, the image tags and branch protection: [docs/ci.md](docs/
 - Testing: [docs/testing.md](docs/testing.md)
 - CI/CD: [docs/ci.md](docs/ci.md)
 - Kubernetes (Helm on kind): [docs/kubernetes.md](docs/kubernetes.md)
-- Cloud demo environment (Terraform on Oracle Cloud): [docs/terraform.md](docs/terraform.md)
+- GitOps release flow (Argo CD): [docs/gitops.md](docs/gitops.md)
+- Cloud environment as code (Terraform for Oracle Cloud; written, not applied): [docs/terraform.md](docs/terraform.md)
 - ML results: [docs/ml-results.md](docs/ml-results.md)
 - Project conventions: [CLAUDE.md](CLAUDE.md)
 
@@ -45,7 +46,8 @@ make e2e     # end-to-end suite against the stack
 make down    # stop (keeps data volumes)
 ```
 
-On Kubernetes instead: `make k8s-up` (kind + Traefik, then http://localhost:8089; see docs/kubernetes.md).
+On Kubernetes instead: `make k8s-up` (kind + Traefik + Argo CD, which deploys from Git; then
+http://localhost:8089; see docs/kubernetes.md and docs/gitops.md).
 
 The UI and API are served by the gateway at `http://localhost:${GATEWAY_HOST_PORT}` (default 8080).
 `make help` lists every target.
