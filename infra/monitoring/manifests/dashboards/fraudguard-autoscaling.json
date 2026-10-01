@@ -809,7 +809,7 @@
     },
     {
       "type": "row",
-      "title": "deep-scan: scales on queue depth (20 ready messages per pod, 1 to 3 pods)",
+      "title": "transaction-service: scales on CPU (target 60% of the 250m request, 1 to 4 pods)",
       "id": 11,
       "collapsed": false,
       "panels": [],
@@ -818,6 +818,383 @@
         "w": 24,
         "x": 0,
         "y": 24
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "transaction-service replicas",
+      "description": "HPA current and desired replicas, and pods actually available (ready). Every transfer runs here synchronously, so it is the first service to need more pods.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "kube_horizontalpodautoscaler_status_current_replicas{namespace=\"fraudguard\", horizontalpodautoscaler=\"transaction-service\"}",
+          "legendFormat": "current",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "kube_horizontalpodautoscaler_status_desired_replicas{namespace=\"fraudguard\", horizontalpodautoscaler=\"transaction-service\"}",
+          "legendFormat": "desired",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "kube_deployment_status_replicas_available{namespace=\"fraudguard\", deployment=\"transaction-service\"}",
+          "legendFormat": "available",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "kube_horizontalpodautoscaler_spec_max_replicas{namespace=\"fraudguard\", horizontalpodautoscaler=\"transaction-service\"}",
+          "legendFormat": "max",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "max"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 12,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "transaction-service CPU utilization (HPA view)",
+      "description": "Average CPU of the transaction-service pods as a share of their request, against the target.",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "kube_horizontalpodautoscaler_status_target_metric{namespace=\"fraudguard\", horizontalpodautoscaler=\"transaction-service\", metric_name=\"cpu\", metric_target_type=\"utilization\"}",
+          "legendFormat": "current %",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "kube_horizontalpodautoscaler_spec_target_metric{namespace=\"fraudguard\", horizontalpodautoscaler=\"transaction-service\", metric_name=\"cpu\", metric_target_type=\"utilization\"}",
+          "legendFormat": "target %",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "target %"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "yellow"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 13,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "MongoDB CPU (cores)",
+      "description": "The shared database every transfer writes to (two transactions per transfer). Its 1-core limit is the end-to-end bottleneck on the local cluster (docs/performance.md).",
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(container_cpu_usage_seconds_total{namespace=\"fraudguard\", container=\"mongodb\"}[$__rate_interval]))",
+          "legendFormat": "mongodb",
+          "range": true,
+          "instant": false
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(kube_pod_container_resource_limits{namespace=\"fraudguard\", container=\"mongodb\", resource=\"cpu\"})",
+          "legendFormat": "limit",
+          "range": true,
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "mode": "none",
+              "group": "A"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "color": {
+            "mode": "palette-classic"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
+          "min": 0
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "limit"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "fill": "dash",
+                  "dash": [
+                    10,
+                    10
+                  ]
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "red"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "id": 14,
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 25
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "row",
+      "title": "deep-scan: scales on queue depth (20 ready messages per pod, 1 to 3 pods)",
+      "id": 15,
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 33
       }
     },
     {
@@ -944,12 +1321,12 @@
           "sort": "desc"
         }
       },
-      "id": 12,
+      "id": 16,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 25
+        "y": 34
       },
       "datasource": {
         "type": "prometheus",
@@ -1058,12 +1435,12 @@
           "sort": "desc"
         }
       },
-      "id": 13,
+      "id": 17,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 25
+        "y": 34
       },
       "datasource": {
         "type": "prometheus",
@@ -1131,12 +1508,12 @@
           "sort": "desc"
         }
       },
-      "id": 14,
+      "id": 18,
       "gridPos": {
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 25
+        "y": 34
       },
       "datasource": {
         "type": "prometheus",
@@ -1146,14 +1523,14 @@
     {
       "type": "row",
       "title": "Resources",
-      "id": 15,
+      "id": 19,
       "collapsed": false,
       "panels": [],
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 42
       }
     },
     {
@@ -1217,12 +1594,12 @@
           "sort": "desc"
         }
       },
-      "id": 16,
+      "id": 20,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 34
+        "y": 43
       },
       "datasource": {
         "type": "prometheus",
@@ -1290,12 +1667,12 @@
           "sort": "desc"
         }
       },
-      "id": 17,
+      "id": 21,
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 34
+        "y": 43
       },
       "datasource": {
         "type": "prometheus",
