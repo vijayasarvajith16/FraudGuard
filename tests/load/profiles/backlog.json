@@ -1,0 +1,9 @@
+{
+  "description": "Steady load with a deep-scan consumer outage: deep-scan is scaled to 0 at +60 s and back to 1 at +150 s, so flagged transfers queue up; its queue-depth autoscaler then scales out to drain the backlog.",
+  "stages": [
+    { "duration": "20s", "target": 10 },
+    { "duration": "340s", "target": 10, "label": "steady" },
+    { "duration": "10s", "target": 0 }
+  ],
+  "drill": { "deployment": "deep-scan-service", "stopAt": 60, "resumeAt": 150 }
+}

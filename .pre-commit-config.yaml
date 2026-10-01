@@ -36,7 +36,7 @@ repos:
         name: never commit .env files or datasets
         language: fail
         entry: ".env files and datasets must not be committed (keep secrets in .env, data in ml/data/, both gitignored)"
-        files: '(^|/)\.env$|(^|/)\.env\.(?!example$)[^/]+$|^ml/data/(?!\.gitkeep$)|\.csv$'
+        files: '(^|/)\.env$|(^|/)\.env\.(?!example$)[^/]+$|^ml/data/(?!\.gitkeep$)|^tests/load/data/|\.csv$'
 
   # Python: each project's pyproject.toml (or the root ruff.toml) supplies the rules.
   - repo: https://github.com/astral-sh/ruff-pre-commit

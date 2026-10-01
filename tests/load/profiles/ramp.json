@@ -1,0 +1,16 @@
+{
+  "description": "Stepped ramp: five load steps, each held long enough for quick-scan's CPU autoscaler to react. Targets are per k6 pod (the total is pods x target).",
+  "stages": [
+    { "duration": "30s", "target": 2 },
+    { "duration": "60s", "target": 2, "label": "step 1" },
+    { "duration": "15s", "target": 5 },
+    { "duration": "90s", "target": 5, "label": "step 2" },
+    { "duration": "15s", "target": 9 },
+    { "duration": "90s", "target": 9, "label": "step 3" },
+    { "duration": "15s", "target": 13 },
+    { "duration": "90s", "target": 13, "label": "step 4" },
+    { "duration": "15s", "target": 17 },
+    { "duration": "120s", "target": 17, "label": "step 5" },
+    { "duration": "15s", "target": 0 }
+  ]
+}
