@@ -20,6 +20,13 @@ docker compose up -d --wait auth-service   # from the repo root
 
 Configuration is environment-only; see [.env.example](.env.example). Invalid config fails at startup and lists every problem.
 
+## Container image
+
+CI (`.github/workflows/auth-service.yml`) builds, scans and, on every push to `main` that touches this
+service, publishes `ghcr.io/vijayasarvajith16/fraudguard-auth-service` with two tags:
+`sha-<commit>` (immutable; what deployments pin) and the `version` from `package.json`. See
+[docs/ci.md](../../docs/ci.md).
+
 ## Design notes
 
 - **Data access:** native MongoDB driver through `src/models/userRepository.js`, which validates every document with zod before writing. Duplicate emails are prevented by a unique index, not a read-then-write check, so concurrent registrations are race-free.
