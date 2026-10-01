@@ -15,6 +15,9 @@ spec:
     - name: management
       port: 15672
       targetPort: management
+    - name: prometheus
+      port: 15692
+      targetPort: prometheus
 ---
 apiVersion: v1
 kind: Service
@@ -51,6 +54,13 @@ spec:
       labels:
         app.kubernetes.io/name: {{ .Release.Name }}
         app.kubernetes.io/part-of: fraudguard
+      # Prometheus (infra/monitoring) scrapes per-queue depth from the rabbitmq_prometheus plugin:
+      # /metrics/detailed?family=queue_coarse_metrics -> rabbitmq_detailed_queue_messages_ready{queue}.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "15692"
+        prometheus.io/path: /metrics/detailed
+        prometheus.io/param_family: queue_coarse_metrics
     spec:
       automountServiceAccountToken: false
       # The official image starts as root to fix data-directory ownership, then drops to the
@@ -69,6 +79,8 @@ spec:
               containerPort: 5672
             - name: management
               containerPort: 15672
+            - name: prometheus # rabbitmq_prometheus plugin (enabled in the image); infra/monitoring
+              containerPort: 15692
           env:
             - name: RABBITMQ_DEFAULT_USER
               valueFrom: { secretKeyRef: { name: {{ .Values.existingSecret }}, key: RABBITMQ_DEFAULT_USER } }

@@ -23,3 +23,6 @@ ingress:
 resources:
   requests: { cpu: 10m, memory: 16Mi }
   limits: { cpu: 200m, memory: 32Mi }
+
+metrics:
+  enabled: false # static files: traffic is measured at the gateway
