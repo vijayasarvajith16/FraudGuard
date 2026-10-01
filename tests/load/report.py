@@ -253,13 +253,24 @@ def render(
             f"| {s['stage']} | {s['target_rps']:.0f}/s | {num(s['achieved_rps'], '{:.1f}')}/s | {ms(s['p50'])} "
             f"| {ms(s['p95'])} | {ms(s['p99'])} | {pct(s['error_rate'])} |"
         )
+    server_columns = (
+        "Stage",
+        "transaction-service pods",
+        "transaction-service CPU",
+        "MongoDB CPU",
+        "quick-scan pods",
+        "quick-scan CPU (HPA)",
+        "quick-scan scoring p95",
+        "To deep-scan",
+        "Queue max",
+        "deep-scan pods",
+    )
     out += [
         "",
         "Server side (maximum replicas and average CPU over each stage):",
         "",
-        "| Stage | transaction-service pods | transaction-service CPU | MongoDB CPU | quick-scan pods "
-        "| quick-scan CPU (HPA) | quick-scan scoring p95 | To deep-scan | Queue max | deep-scan pods |",
-        "|---|---|---|---|---|---|---|---|---|---|",
+        "| " + " | ".join(server_columns) + " |",
+        "|" + "---|" * len(server_columns),
     ]
     for s in stages:
         out.append(
