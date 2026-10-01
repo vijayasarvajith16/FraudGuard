@@ -1,0 +1,12 @@
+# metrics-server (chart kubernetes-sigs/metrics-server, deployed by Argo CD into kube-system):
+# pod CPU and memory on the Kubernetes metrics API, for quick-scan's CPU autoscaler and
+# `kubectl top`. kind does not ship it.
+
+args:
+  # kind's kubelets serve self-signed certificates. Acceptable on a local single-node cluster
+  # only; a real cluster uses kubelet certificates signed by the cluster CA instead.
+  - --kubelet-insecure-tls
+
+resources:
+  requests: { cpu: 20m, memory: 48Mi }
+  limits: { cpu: 200m, memory: 128Mi }

@@ -1,0 +1,62 @@
+{{- /*
+Monitoring and autoscaling add-ons (AppProject "platform"). Each chart Application has two sources:
+the upstream chart at its pinned version, and this repository (ref "values") for its values files.
+*/ -}}
+{{- $m := .Values.monitoring -}}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-manifests
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: fraudguard
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ $m.manifestsWave | quote }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: {{ .Values.repoURL }}
+    targetRevision: {{ .Values.targetRevision }}
+    path: infra/monitoring/manifests
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $m.namespace }}
+  syncPolicy:
+    {{- /* Server-side apply: dashboard ConfigMaps can outgrow the client-side annotation limit. */}}
+    {{- include "fraudguard.syncPolicy" (dict "syncOptions" (list "ServerSideApply=true")) | nindent 4 }}
+{{- range $m.charts }}
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ .name }}
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: fraudguard
+  annotations:
+    argocd.argoproj.io/sync-wave: {{ .wave | quote }}
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  sources:
+    - repoURL: {{ .repoURL }}
+      chart: {{ .chart }}
+      targetRevision: {{ .version | quote }}
+      helm:
+        releaseName: {{ .name }}
+        valueFiles:
+          {{- range .valueFiles }}
+          - $values/infra/monitoring/{{ . }}
+          {{- end }}
+    - repoURL: {{ $.Values.repoURL }}
+      targetRevision: {{ $.Values.targetRevision }}
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ .namespace | default $m.namespace }}
+  syncPolicy:
+    {{- include "fraudguard.syncPolicy" . | nindent 4 }}
+{{- end }}

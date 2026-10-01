@@ -4,6 +4,7 @@
 #                     deployments to Argo CD (GitOps: it deploys what is in Git, docs/gitops.md)
 #   make k8s-status   applications, pods, ingress, node memory
 #   make k8s-argocd   Argo CD UI (port-forward to https://localhost:8443)
+#   make k8s-grafana  Grafana URL and admin password;  make k8s-prometheus  Prometheus UI (port-forward)
 #   make k8s-stop     stop the node container (keeps state);  make k8s-start  resume it
 #   make k8s-down     delete the cluster and all its data
 # Env: KIND_HTTP_PORT (default 8089); ARGOCD_REVISION (default main) to follow another branch;
@@ -25,6 +26,10 @@ ARGOCD_MANIFEST_SHA256=7efe2d6bbc03f63623640f1e4198f16c84009d510fb810ef71e56df1b
 # Git revision the app-of-apps follows (a branch name tests a change before it merges).
 ARGOCD_REVISION="${ARGOCD_REVISION:-main}"
 SERVICES=(auth-service transaction-service alerting-service quick-scan-service deep-scan-service api-gateway frontend)
+MONITORING_NS=monitoring
+# yq (in Docker) reads the monitoring chart pins from infra/argocd/apps/values.yaml, the single source
+# of truth for both modes. Same image as tests/monitoring/run.sh.
+YQ_IMAGE=mikefarah/yq:4.54.1@sha256:4b3d9475d65571d28cbb19544d3820ec2945e4c8b2f18279394282b8dc3a592e
 # Keys copied from .env into the fraudguard-secrets Secret (values are never written to the repo).
 SECRET_KEYS=(MONGO_ROOT_USERNAME MONGO_ROOT_PASSWORD MONGO_AUTH_PASSWORD MONGO_TRANSACTIONS_PASSWORD
   MONGO_ALERTS_PASSWORD RABBITMQ_DEFAULT_USER RABBITMQ_DEFAULT_PASS JWT_SECRET INTERNAL_SERVICE_TOKEN
@@ -44,6 +49,20 @@ need() {
 }
 
 cluster_exists() { kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; }
+
+# One line per monitoring chart: name namespace repoURL chart version valuesfile[,valuesfile...]
+monitoring_charts() {
+  docker run --rm -i "$YQ_IMAGE" \
+    '.monitoring.charts[] | [.name, (.namespace // "'"$MONITORING_NS"'"), .repoURL, .chart, .version, (.valueFiles | join(","))] | join(" ")' \
+    < infra/argocd/apps/values.yaml
+}
+
+# helm arguments to render or install one monitoring chart, from a monitoring_charts line.
+monitoring_chart_args() {
+  local name="$1" ns="$2" repo="$3" chart="$4" version="$5" values="$6" f
+  printf '%s %s --repo %s --version %s -n %s' "$name" "$chart" "$repo" "$version" "$ns"
+  for f in ${values//,/ }; do printf ' -f %s' "infra/monitoring/$f"; done
+}
 
 create_cluster() {
   if cluster_exists; then
@@ -118,6 +137,11 @@ preload_platform_images() {
       h template traefik traefik/traefik --version "$TRAEFIK_CHART_VERSION" -f infra/kind/traefik-values.yaml
       h template mongodb infra/helm/mongodb -n "$NS"
       h template rabbitmq infra/helm/rabbitmq -n "$NS"
+      local line
+      monitoring_charts | while read -r line; do
+        # shellcheck disable=SC2046,SC2086
+        h template $(monitoring_chart_args $line)
+      done
       if [ "$K8S_LOCAL_IMAGES" != "1" ]; then cat "$(argocd_manifest)"; fi
     } | sed -nE 's/^[[:space:]]*image:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/p' | sort -u
   )"
@@ -164,9 +188,23 @@ load_local_images() {
 # ---- shared ---------------------------------------------------------------------------------------
 
 namespace_and_secrets() {
-  log "Namespace and secrets"
+  log "Namespaces and secrets"
   k apply -f "$(native_path infra/argocd/platform/namespace.yaml)"
+  k apply -f "$(native_path infra/monitoring/manifests/namespace.yaml)"
   apply_secrets
+  grafana_admin_secret
+}
+
+# Grafana's admin password: random, generated once per cluster, never in Git or .env.
+grafana_admin_secret() {
+  if k -n "$MONITORING_NS" get secret grafana-admin >/dev/null 2>&1; then
+    return
+  fi
+  log "Secret grafana-admin (random password; 'make k8s-grafana' prints it)"
+  local password
+  password="$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24 || true)"
+  k -n "$MONITORING_NS" create secret generic grafana-admin \
+    --from-literal=admin-user=admin --from-literal=admin-password="$password" >/dev/null
 }
 
 # ---- direct Helm (K8S_LOCAL_IMAGES=1) ----------------------------------------------------------
@@ -177,6 +215,14 @@ helm_deploy() {
     echo "       Run 'make k8s-down' first to switch to K8S_LOCAL_IMAGES=1."
     exit 1
   fi
+  log "Monitoring and metrics APIs (the charts and values Argo CD uses)"
+  k apply --server-side -k "$(native_path infra/monitoring/manifests)"
+  local line
+  while read -r line; do
+    # shellcheck disable=SC2046,SC2086
+    h upgrade --install $(monitoring_chart_args $line) --wait --timeout 10m
+  done < <(monitoring_charts)
+
   # First start initializes the replica set and users: allow for a slow machine.
   h upgrade --install mongodb infra/helm/mongodb -n "$NS" --wait --timeout 10m
   h upgrade --install rabbitmq infra/helm/rabbitmq -n "$NS" --wait --timeout 10m
@@ -232,6 +278,13 @@ adopt_helm_releases() {
     log "Handing the Helm-deployed releases over to Argo CD"
     k -n "$NS" delete secret -l owner=helm
   fi
+  local name ns _
+  while read -r name ns _; do
+    if k -n "$ns" get secret -l "owner=helm,name=${name}" -o name 2>/dev/null | grep -q .; then
+      log "Handing the Helm release ${name} (${ns}) over to Argo CD"
+      k -n "$ns" delete secret -l "owner=helm,name=${name}"
+    fi
+  done < <(monitoring_charts)
 }
 
 apply_root() {
@@ -242,11 +295,13 @@ apply_root() {
 
 wait_for_apps() {
   log "Waiting for every Argo CD application to be Synced and Healthy"
-  local deadline=$((SECONDS + 900)) pending
+  local deadline=$((SECONDS + 900)) pending expected
+  # The root application plus every Application the app-of-apps renders.
+  expected=$(($(h template fraudguard infra/argocd/apps | grep -c '^kind: Application$') + 1))
   while :; do
     pending="$(k -n argocd get applications -o jsonpath='{range .items[*]}{.metadata.name}={.status.sync.status}/{.status.health.status}{"\n"}{end}' \
       | grep -v '=Synced/Healthy$' || true)"
-    if [ -z "$pending" ] && [ "$(k -n argocd get applications -o name | wc -l)" -ge 11 ]; then
+    if [ -z "$pending" ] && [ "$(k -n argocd get applications -o name | wc -l)" -ge "$expected" ]; then
       break
     fi
     if [ $SECONDS -ge $deadline ]; then
@@ -277,7 +332,24 @@ up() {
     wait_for_apps
   fi
   log "FraudGuard is up: http://localhost:${KIND_HTTP_PORT}  (API: /api, see docs/kubernetes.md)"
+  echo "Grafana: http://localhost:${KIND_HTTP_PORT}/grafana/  (admin password: make k8s-grafana)"
   status
+}
+
+grafana_ui() {
+  need kubectl
+  echo "Grafana: http://localhost:${KIND_HTTP_PORT}/grafana/  (dashboards open without a login)"
+  printf 'admin login: user admin, password '
+  k -n "$MONITORING_NS" get secret grafana-admin -o jsonpath='{.data.admin-password}' | base64 -d
+  echo
+}
+
+prometheus_ui() {
+  need kubectl
+  local port="${PROMETHEUS_PORT:-9090}"
+  echo "Prometheus UI: http://localhost:${port}  (alerts: /alerts, targets: /targets)"
+  echo "(port-forward running; Ctrl+C to stop)"
+  k -n "$MONITORING_NS" port-forward svc/prometheus-server "${port}:80"
 }
 
 argocd_ui() {
@@ -299,6 +371,10 @@ status() {
   echo
   k -n "$NS" get ingress
   echo
+  k -n "$NS" get hpa 2>/dev/null || true
+  echo
+  k -n "$MONITORING_NS" get pods 2>/dev/null || true
+  echo
   docker stats --no-stream --format 'kind node {{.Name}}: {{.MemUsage}} memory, {{.CPUPerc}} CPU' "$NODE" 2>/dev/null || true
 }
 
@@ -306,8 +382,10 @@ case "${1:-}" in
   up) up ;;
   status) status ;;
   argocd) argocd_ui ;;
+  grafana) grafana_ui ;;
+  prometheus) prometheus_ui ;;
   stop) need docker; docker stop "$NODE" ;;
   start) need docker; docker start "$NODE" && echo "started; pods take a minute to become ready (make k8s-status)" ;;
   down) need kind; kind delete cluster --name "$CLUSTER" ;;
-  *) echo "usage: $0 up|status|argocd|stop|start|down"; exit 2 ;;
+  *) echo "usage: $0 up|status|argocd|grafana|prometheus|stop|start|down"; exit 2 ;;
 esac

@@ -26,8 +26,8 @@ PY_STAMPS   := $(addsuffix /.venv/.installed,$(PY_SERVICES))
 LOAD_ENV = test -f .env || { echo "No .env: run 'make env' first."; exit 1; }; set -a; . ./.env; set +a
 
 .PHONY: help env install hooks up down ps logs mongo-users test lint e2e test-integration gateway-test \
-        ml-test ml-lint replay demo-samples secrets-scan clean-deps \
-        k8s-up k8s-status k8s-argocd k8s-stop k8s-start k8s-down
+        ml-test ml-lint replay demo-samples secrets-scan clean-deps test-monitoring \
+        k8s-up k8s-status k8s-argocd k8s-grafana k8s-prometheus k8s-stop k8s-start k8s-down
 
 help: ## List available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -112,6 +112,9 @@ gateway-test: .venv/.installed ## Black-box tests of the running gateway (routin
 	GATEWAY_URL="http://127.0.0.1:$${GATEWAY_HOST_PORT:-8080}" GATEWAY_ALLOWED_ORIGIN="http://localhost:5173" \
 	$(DEV_PY) -m pytest services/api-gateway/tests -q -p no:cacheprovider
 
+test-monitoring: ## Alert rule unit tests and dashboard query checks (promtool in Docker)
+	bash tests/monitoring/run.sh
+
 ml-test: ml/.venv/.installed ## ML pipeline sanity tests (synthetic data, no training)
 	cd ml && .venv/$(VENV_BIN)/python -m pytest
 
@@ -135,6 +138,12 @@ k8s-status: ## Argo CD applications, pods, ingress and the kind node's memory us
 
 k8s-argocd: ## Open the Argo CD UI (port-forward to https://localhost:8443, prints the password)
 	bash infra/kind/k8s.sh argocd
+
+k8s-grafana: ## Grafana URL (http://localhost:8089/grafana/) and its admin password
+	bash infra/kind/k8s.sh grafana
+
+k8s-prometheus: ## Open the Prometheus UI (port-forward to http://localhost:9090)
+	bash infra/kind/k8s.sh prometheus
 
 k8s-stop: ## Stop the kind node (keeps the cluster and its data)
 	bash infra/kind/k8s.sh stop

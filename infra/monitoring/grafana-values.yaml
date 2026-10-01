@@ -1,0 +1,75 @@
+# Grafana (chart grafana-community/grafana, deployed by Argo CD), served through Traefik at
+# http://localhost:8089/grafana/ (bound to 127.0.0.1 like the app). Everything it shows is code: the
+# Prometheus data source below, and the dashboards in infra/monitoring/dashboards, which a sidecar
+# loads from ConfigMaps labeled grafana_dashboard. Hence no persistent volume.
+
+# Admin login: a random password in the grafana-admin Secret, created by `make k8s-up` (never in
+# Git); `make k8s-grafana` prints it. Viewing the dashboards needs no login.
+admin:
+  existingSecret: grafana-admin
+
+grafana.ini:
+  server:
+    domain: localhost
+    root_url: http://localhost:8089/grafana/
+    serve_from_sub_path: true
+  auth.anonymous:
+    enabled: true
+    org_role: Viewer
+  analytics:
+    reporting_enabled: false
+    check_for_updates: false
+    check_for_plugin_updates: false
+  news:
+    news_feed_enabled: false
+  plugins:
+    # No plugin downloads at startup (Grafana 12+ preinstalls several app plugins): the dashboards
+    # use only built-in panels, and it saves ~70 MiB.
+    preinstall_disabled: true
+
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  path: /grafana
+  pathType: Prefix
+  hosts: [] # any host: the ingress listens on 127.0.0.1 only
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus # the dashboards reference this uid
+        type: prometheus
+        access: proxy
+        url: http://prometheus-server.monitoring.svc.cluster.local
+        isDefault: true
+        editable: false
+        jsonData:
+          timeInterval: 15s # the scrape interval: $__rate_interval never drops below 4x this
+
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    searchNamespace: null # Grafana's own namespace only
+  resources:
+    requests: { cpu: 10m, memory: 64Mi }
+    limits: { cpu: 100m, memory: 128Mi }
+
+# The sidecar only reads ConfigMaps in this namespace: a Role instead of a ClusterRole.
+rbac:
+  namespaced: true
+
+persistence:
+  enabled: false
+initChownData:
+  enabled: false # nothing to chown without a volume
+
+testFramework:
+  enabled: false
+
+# Grafana 13 settles at ~245 MiB here.
+resources:
+  requests: { cpu: 50m, memory: 256Mi }
+  limits: { cpu: 500m, memory: 384Mi }

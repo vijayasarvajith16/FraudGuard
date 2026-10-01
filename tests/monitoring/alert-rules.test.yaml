@@ -1,0 +1,277 @@
+# promtool unit tests for infra/monitoring/alert-rules.yaml. Run: `make test-monitoring`
+# (tests/monitoring/run.sh extracts the rules exactly as the Prometheus chart renders them).
+rule_files:
+  - alerting_rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # ---- availability ----------------------------------------------------------------------------
+  - name: ServiceDown fires after 2 minutes with nothing available, only in the fraudguard namespace
+    interval: 1m
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="fraudguard", deployment="auth-service"}'
+        values: "1 1 0 0 0 0 0 0"
+      - series: 'kube_statefulset_status_replicas_ready{namespace="fraudguard", statefulset="rabbitmq"}'
+        values: "1x7"
+      - series: 'kube_deployment_status_replicas_available{namespace="monitoring", deployment="grafana"}'
+        values: "0x7"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ServiceDown
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: { severity: critical, namespace: fraudguard, deployment: auth-service }
+            exp_annotations:
+              summary: auth-service has no available pods
+              description: No ready replica for 2 minutes. Check `kubectl -n fraudguard get pods` and the pod events.
+
+  - name: ServiceDown covers the StatefulSets (data stores)
+    interval: 1m
+    input_series:
+      - series: 'kube_statefulset_status_replicas_ready{namespace="fraudguard", statefulset="mongodb"}'
+        values: "0x5"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: { severity: critical, namespace: fraudguard, statefulset: mongodb }
+            exp_annotations:
+              summary: mongodb has no available pods
+              description: No ready replica for 2 minutes. Check `kubectl -n fraudguard get pods` and the pod events.
+
+  - name: ScrapeTargetDown tolerates a slow start but not 5 minutes without metrics
+    interval: 1m
+    input_series:
+      - series: 'up{namespace="fraudguard", job="kubernetes-pods", pod="quick-scan-service-7d9f-x2", instance="10.244.0.21:8000", app_kubernetes_io_name="quick-scan-service"}'
+        values: "1 0 0 0 0 0 0 0 0"
+      - series: 'up{namespace="fraudguard", job="kubernetes-pods", pod="deep-scan-service-5c6b-q8", instance="10.244.0.22:8000", app_kubernetes_io_name="deep-scan-service"}'
+        values: "0 0 0 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ScrapeTargetDown
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: ScrapeTargetDown
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: fraudguard
+              job: kubernetes-pods
+              pod: quick-scan-service-7d9f-x2
+              instance: 10.244.0.21:8000
+              app_kubernetes_io_name: quick-scan-service
+            exp_annotations:
+              summary: quick-scan-service-7d9f-x2 has not answered /metrics for 5 minutes
+              description: Prometheus cannot scrape 10.244.0.21:8000 (quick-scan-service).
+
+  # ---- queues ------------------------------------------------------------------------------------
+  - name: QueueLagHigh fires on a sustained backlog in a main queue, not in retry queues
+    interval: 1m
+    input_series:
+      - series: 'rabbitmq_detailed_queue_messages_ready{namespace="fraudguard", pod="rabbitmq-0", vhost="/", queue="transactions.flagged"}'
+        values: "0 50 150 150 150 150 150"
+      - series: 'rabbitmq_detailed_queue_messages_ready{namespace="fraudguard", pod="rabbitmq-0", vhost="/", queue="transactions.flagged.retry"}'
+        values: "500x6"
+      - series: 'rabbitmq_detailed_queue_messages_ready{namespace="fraudguard", pod="rabbitmq-0", vhost="/", queue="transactions.scored"}'
+        values: "0x6"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: QueueLagHigh
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: QueueLagHigh
+        exp_alerts:
+          - exp_labels: { severity: warning, queue: transactions.flagged }
+            exp_annotations:
+              summary: transactions.flagged has 150 messages waiting
+              description: "More than 100 ready messages for 2 minutes: flagged transactions wait longer for a verdict."
+
+  - name: DeepScanVerdictDelayed fires when p95 time-to-verdict stays above 10 s
+    interval: 1m
+    input_series:
+      # Every verdict takes 10-30 s: p95 interpolates to 29 s.
+      - series: 'queue_processing_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", le="10"}'
+        values: "0x12"
+      - series: 'queue_processing_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", le="30"}'
+        values: "0+60x12"
+      - series: 'queue_processing_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", le="+Inf"}'
+        values: "0+60x12"
+      # alerting-service's histogram has the same name and must not count.
+      - series: 'queue_processing_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="alerting-service", le="+Inf"}'
+        values: "0+60x12"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: DeepScanVerdictDelayed
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: DeepScanVerdictDelayed
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: Flagged transactions wait 29s (p95) for a deep-scan verdict
+              description: p95 from transaction.flagged to its acknowledged score is above 10 s.
+
+  - name: DeadLetterQueueNotEmpty fires for any .dlq queue holding messages
+    interval: 1m
+    input_series:
+      - series: 'rabbitmq_detailed_queue_messages{namespace="fraudguard", pod="rabbitmq-0", vhost="/", queue="transactions.scored.dlq"}'
+        values: "0 0 2 2 2"
+      - series: 'rabbitmq_detailed_queue_messages{namespace="fraudguard", pod="rabbitmq-0", vhost="/", queue="transactions.flagged"}'
+        values: "300x4"
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: DeadLetterQueueNotEmpty
+        exp_alerts: []
+      - eval_time: 4m
+        alertname: DeadLetterQueueNotEmpty
+        exp_alerts:
+          - exp_labels: { severity: warning, queue: transactions.scored.dlq }
+            exp_annotations:
+              summary: transactions.scored.dlq holds 2 dead-lettered messages
+              description: Messages exhausted their retries or failed permanently; inspect them in the RabbitMQ UI.
+
+  # ---- latency -----------------------------------------------------------------------------------
+  - name: QuickScanLatencySLOBreach fires above 20 ms p95; a fast deep-scan does not fire its own rule
+    interval: 1m
+    input_series:
+      # quick-scan: every request between 20 and 30 ms -> p95 29.5 ms.
+      - series: 'scan_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", le="0.02"}'
+        values: "0x12"
+      - series: 'scan_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", le="0.03"}'
+        values: "0+100x12"
+      - series: 'scan_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="quick-scan-service", pod="quick-scan-service-a", le="+Inf"}'
+        values: "0+100x12"
+      # deep-scan: every request under 5 ms.
+      - series: 'scan_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-a", le="0.005"}'
+        values: "0+100x12"
+      - series: 'scan_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-a", le="+Inf"}'
+        values: "0+100x12"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: QuickScanLatencySLOBreach
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: QuickScanLatencySLOBreach
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: quick-scan scoring p95 is 29.5ms (SLO 20 ms)
+              description: Every transfer waits for quick-scan. Check CPU throttling and the autoscaler.
+      - eval_time: 8m
+        alertname: DeepScanLatencySLOBreach
+        exp_alerts: []
+
+  - name: DeepScanLatencySLOBreach fires above 20 ms p95
+    interval: 1m
+    input_series:
+      - series: 'scan_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-a", le="0.03"}'
+        values: "0x12"
+      - series: 'scan_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-a", le="0.05"}'
+        values: "0+100x12"
+      - series: 'scan_latency_seconds_bucket{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-a", le="+Inf"}'
+        values: "0+100x12"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: DeepScanLatencySLOBreach
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: deep-scan scoring p95 is 49ms (SLO 20 ms)
+              description: deep-scan is off the request path, but slow scoring builds a queue backlog.
+
+  # ---- errors ------------------------------------------------------------------------------------
+  - name: HighErrorRate counts API 5xx per service; failing health checks and quiet services do not count
+    interval: 1m
+    input_series:
+      # transaction-service: 1 req/s succeeds, 0.1 req/s fails -> 9.1% errors.
+      - series: 'http_requests_total{namespace="fraudguard", app_kubernetes_io_name="transaction-service", method="POST", route="/transactions/", status="201"}'
+        values: "0+60x12"
+      - series: 'http_requests_total{namespace="fraudguard", app_kubernetes_io_name="transaction-service", method="POST", route="/transactions/", status="503"}'
+        values: "0+6x12"
+      # auth-service: its readiness checks fail, its API is fine.
+      - series: 'http_requests_total{namespace="fraudguard", app_kubernetes_io_name="auth-service", method="GET", route="/health", status="503"}'
+        values: "0+60x12"
+      - series: 'http_requests_total{namespace="fraudguard", app_kubernetes_io_name="auth-service", method="POST", route="/auth/login", status="200"}'
+        values: "0+60x12"
+      # alerting-service: one failed request in 12 minutes is below the traffic floor.
+      - series: 'http_requests_total{namespace="fraudguard", app_kubernetes_io_name="alerting-service", method="GET", route="/alerts/", status="500"}'
+        values: "0 1x11"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: HighErrorRate
+        exp_alerts: []
+      - eval_time: 8m
+        alertname: HighErrorRate
+        exp_alerts:
+          - exp_labels: { severity: warning, app_kubernetes_io_name: transaction-service }
+            exp_annotations:
+              summary: "transaction-service: 9.091% of requests fail with 5xx"
+              description: More than 5% server errors for 5 minutes.
+
+  - name: QuickScanCallsFailing fires when more than 5% of calls time out or fail
+    interval: 1m
+    input_series:
+      - series: 'quick_scan_calls_total{namespace="fraudguard", app_kubernetes_io_name="transaction-service", result="ok"}'
+        values: "0+80x12"
+      - series: 'quick_scan_calls_total{namespace="fraudguard", app_kubernetes_io_name="transaction-service", result="flagged"}'
+        values: "0+10x12"
+      - series: 'quick_scan_calls_total{namespace="fraudguard", app_kubernetes_io_name="transaction-service", result="timeout"}'
+        values: "0+10x12"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: QuickScanCallsFailing
+        exp_alerts:
+          - exp_labels: { severity: warning }
+            exp_annotations:
+              summary: 10% of quick-scan calls time out or fail
+              description: Affected transfers go to deep-scan review instead of instant approval.
+
+  # ---- risk --------------------------------------------------------------------------------------
+  - name: CriticalTierSpike fires on a burst against a quiet 6-hour baseline
+    interval: 1m
+    input_series:
+      # 400 minutes without CRITICAL verdicts, then one per minute (two deep-scan pods).
+      - series: 'risk_tier_total{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-a", tier="CRITICAL"}'
+        values: "0x400 1 2 3 4 5 6 7 8"
+      - series: 'risk_tier_total{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-b", tier="CRITICAL"}'
+        values: "0x408"
+      - series: 'risk_tier_total{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-a", tier="LOW"}'
+        values: "0+50x408"
+    alert_rule_test:
+      - eval_time: 403m
+        alertname: CriticalTierSpike
+        exp_alerts: []
+      - eval_time: 407m
+        alertname: CriticalTierSpike
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: 7 CRITICAL verdicts in the last 10 minutes
+              description: A burst of CRITICAL risk tiers (accounts frozen). Check the admin review queue for a fraud campaign or a bad model.
+
+  - name: CriticalTierSpike stays quiet at a steady CRITICAL rate
+    interval: 1m
+    input_series:
+      - series: 'risk_tier_total{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-a", tier="CRITICAL"}'
+        values: "0+1x420"
+    alert_rule_test:
+      - eval_time: 420m
+        alertname: CriticalTierSpike
+        exp_alerts: []
+
+  - name: CriticalTierSpike fires on a burst right after Prometheus starts (no baseline yet)
+    interval: 1m
+    input_series:
+      - series: 'risk_tier_total{namespace="fraudguard", app_kubernetes_io_name="deep-scan-service", pod="deep-scan-service-a", tier="CRITICAL"}'
+        values: "0 2 4 6 8"
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: CriticalTierSpike
+        exp_alerts:
+          - exp_labels: { severity: critical }
+            exp_annotations:
+              summary: 8 CRITICAL verdicts in the last 10 minutes
+              description: A burst of CRITICAL risk tiers (accounts frozen). Check the admin review queue for a fraud campaign or a bad model.

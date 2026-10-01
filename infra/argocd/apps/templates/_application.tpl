@@ -34,13 +34,22 @@ spec:
     server: https://kubernetes.default.svc
     namespace: {{ .root.Values.namespace }}
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    retry:
-      limit: 5
-      backoff:
-        duration: 10s
-        factor: 2
-        maxDuration: 3m
+    {{- include "fraudguard.syncPolicy" . | nindent 4 }}
+{{- end -}}
+
+{{/* Shared sync policy. Optional argument: syncOptions (list). */}}
+{{- define "fraudguard.syncPolicy" -}}
+automated:
+  prune: true
+  selfHeal: true
+{{- with .syncOptions }}
+syncOptions:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+retry:
+  limit: 5
+  backoff:
+    duration: 10s
+    factor: 2
+    maxDuration: 3m
 {{- end -}}
