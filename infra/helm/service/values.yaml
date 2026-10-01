@@ -8,7 +8,26 @@ image:
   tag: ""
   pullPolicy: IfNotPresent
 
+# Ignored when autoscaling.enabled: the HorizontalPodAutoscaler owns the replica count (and Argo CD
+# must not reset it).
 replicaCount: 1
+
+# Prometheus scrapes pods that carry these annotations (infra/monitoring).
+metrics:
+  enabled: true
+  port: null # defaults to `port`; the gateway uses its exporter sidecar's port
+  path: /metrics
+
+# HorizontalPodAutoscaler. `metrics` is the raw autoscaling/v2 metrics list.
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  metrics: []
+  behavior: {}
+
+# Extra containers in the pod (e.g. a metrics exporter), as raw container specs.
+sidecars: []
 
 # Container port; the Service exposes the same port, so in-cluster URLs match compose
 # (e.g. http://auth-service:3001).

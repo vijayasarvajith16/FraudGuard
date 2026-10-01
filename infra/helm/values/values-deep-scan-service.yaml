@@ -40,3 +40,27 @@ writableSizeLimit: 256Mi
 resources:
   requests: { cpu: 100m, memory: 256Mi }
   limits: { cpu: "1", memory: 512Mi }
+
+# Scales on queue depth, not CPU: a consumer that falls behind shows it as messages waiting in
+# transactions.flagged long before its CPU looks busy. One pod per 20 waiting messages; the metric
+# comes from RabbitMQ through Prometheus and prometheus-adapter (infra/monitoring).
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 3
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: rabbitmq_queue_messages_ready
+          selector:
+            matchLabels:
+              queue: transactions.flagged
+        target:
+          type: AverageValue
+          averageValue: "20"
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+    scaleDown:
+      stabilizationWindowSeconds: 180

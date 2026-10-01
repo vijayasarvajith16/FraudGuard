@@ -31,3 +31,23 @@ ingress:
 resources:
   requests: { cpu: 50m, memory: 32Mi }
   limits: { cpu: 500m, memory: 64Mi }
+
+# nginx exposes only stub_status (port 8090, localhost); the exporter sidecar turns it into
+# Prometheus metrics on 9113 (connections, requests).
+metrics:
+  port: 9113
+sidecars:
+  - name: nginx-exporter
+    image: nginx/nginx-prometheus-exporter:1.5.3
+    args: ["--nginx.scrape-uri=http://127.0.0.1:8090/nginx_status"]
+    ports:
+      - name: metrics
+        containerPort: 9113
+    resources:
+      requests: { cpu: 10m, memory: 16Mi }
+      limits: { cpu: 100m, memory: 32Mi }
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: [ALL]

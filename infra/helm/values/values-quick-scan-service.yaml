@@ -32,3 +32,30 @@ writableSizeLimit: 256Mi # model artifacts are downloaded to /tmp
 resources:
   requests: { cpu: 250m, memory: 256Mi }
   limits: { cpu: "1", memory: 320Mi }
+
+# Scales on CPU: scoring is CPU-bound and synchronous, so CPU tracks load directly. Fast scale-up
+# (the 300 ms hot path), slow scale-down (no flapping). Each new pod downloads the model first.
+autoscaling:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 4
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60 # of the 250m request
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 15
+    scaleDown:
+      stabilizationWindowSeconds: 120
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
