@@ -24,9 +24,10 @@ Kubernetes.kubectl Helm.Helm ezwinports.make`), and a `.env` (`make env`).
 
 | Command | What it does |
 |---|---|
-| `make k8s-up` | Creates the kind cluster `fraudguard` (if missing), installs Traefik, creates the `fraudguard-secrets` Secret from `.env`, deploys MongoDB and RabbitMQ (waiting for both), then the seven services, and waits for every rollout. Re-running it upgrades in place. |
-| `make k8s-up K8S_LOCAL_IMAGES=1` | Same, but builds the images locally (`docker compose build`) and loads them into kind instead of pulling the GHCR tags from `infra/helm/values/`. Use it to test changes that CI has not published yet. |
-| `make k8s-status` | Pods, ingress and the node's memory use. |
+| `make k8s-up` | Creates the kind cluster `fraudguard` (if missing), installs Traefik and **Argo CD**, creates the `fraudguard-secrets` Secret from `.env`, and applies the root Application: Argo CD then deploys the namespace, MongoDB and RabbitMQ, and the seven services from Git, in sync waves (docs/gitops.md). Waits until every application is Synced and Healthy. Re-running it is safe. |
+| `make k8s-up K8S_LOCAL_IMAGES=1` | Without Argo CD: builds the images locally (`docker compose build`), loads them into kind and deploys with Helm directly. Use it to test changes CI has not published yet; on a cluster Argo CD already manages, run `make k8s-down` first (self-heal would revert local images). |
+| `make k8s-status` | Argo CD applications, pods, ingress and the node's memory use. |
+| `make k8s-argocd` | Argo CD UI via port-forward (https://localhost:8443, user `admin`; prints the password). |
 | `make k8s-stop` / `make k8s-start` | Stops / resumes the node container. All state is kept; pods are ready again about a minute after a start. |
 | `make k8s-down` | Deletes the cluster and all its data (the Secret, the databases). |
 
@@ -110,10 +111,11 @@ Measured on the running cluster (kubelet summary API, working set, after replay 
 | MongoDB 163 + RabbitMQ 142 | 305 MiB |
 | Traefik | 21 MiB |
 | **Whole kind node** (all pods + kubelet, containerd, image cache) | **2.4 GiB** (`docker stats`) |
+| With Argo CD (GitOps, Phase 12): application controller 126, repo server 35, server 23, Redis 5 (Dex, notifications and ApplicationSets scaled to 0) | +190 MiB; **node 3.1 GiB** |
 
 The application uses about 0.75 GiB, as it does under docker compose; Kubernetes adds roughly
-1.6 GiB. On a 16 GB machine with Docker Desktop's default 8 GB VM, the cluster and the compose
-stack fit side by side.
+1.6 GiB and Argo CD about 0.2 GiB. On a 16 GB machine with Docker Desktop's default 8 GB VM, the
+cluster and the compose stack fit side by side.
 
 To free the memory: `make k8s-stop` (keeps everything; `make k8s-start` resumes) or `make k8s-down`
 (deletes the cluster; `make k8s-up` recreates it in about 6 minutes). The compose stack and the
@@ -138,6 +140,10 @@ cluster can run side by side, but there is no need to: stop one with `make down`
   `rabbitmq-diagnostics` (a Node.js runtime and an Erlang VM per probe); under host CPU contention
   both timed out and Kubernetes killed healthy data stores. The thorough checks stay as readiness
   probes, where a slow answer only delays traffic instead of restarting the database.
+- **Traefik on a single node** holds host port 80, so its rollout stops the old pod before starting
+  the new one; the chart's default surge-first rollout left the new pod Pending forever. Traefik also
+  publishes `127.0.0.1` into each Ingress's status: without an address, Argo CD keeps an Ingress (and
+  so the gateway and frontend Applications) at Progressing.
 - **Re-running `make k8s-up` changes nothing** when nothing changed. Local images are built without
   provenance attestations because, with them, every cached build gets a new image id, which made
   each re-run reload all images and roll every pod (9 minutes). Unchanged images are now
