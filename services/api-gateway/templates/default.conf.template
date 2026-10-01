@@ -2,6 +2,28 @@
 # /etc/nginx/conf.d/default.conf. Route table: docs/contracts.md §8.
 # Scan services and /internal routes are never reachable through the gateway.
 
+# Service upstreams re-resolve their DNS names (`resolve`, nginx >= 1.27.3). Without it nginx keeps
+# the IPs it saw at startup, so recreating a service container (a redeploy) would make the gateway
+# answer 502 for it until the gateway itself restarted.
+upstream auth_service {
+    zone auth_service 64k;
+    resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+    server auth-service:3001 resolve;
+    keepalive 16;
+}
+upstream transaction_service {
+    zone transaction_service 64k;
+    resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+    server transaction-service:3002 resolve;
+    keepalive 16;
+}
+upstream alerting_service {
+    zone alerting_service 64k;
+    resolver ${NGINX_RESOLVER} valid=10s ipv6=off;
+    server alerting-service:3003 resolve;
+    keepalive 16;
+}
+
 server {
     listen 8080;
     # DNS for lazily resolved upstreams (the frontend), so the gateway starts without them.
