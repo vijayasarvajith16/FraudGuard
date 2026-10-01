@@ -9,8 +9,10 @@ import { TransferTracker } from '../components/TransferTracker.jsx';
 import { WalletCard } from '../components/WalletCard.jsx';
 import { useResource } from '../hooks/useResource.js';
 import { formatDateTime, formatMoney } from '../lib/format.js';
+import { usePageTitle } from '../hooks/usePageTitle.js';
 
 export function DashboardPage() {
+  usePageTitle('Wallet');
   const { api, user } = useAuth();
   const [tracked, setTracked] = useState(null);
   const load = useCallback(async () => {

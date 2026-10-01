@@ -6,8 +6,10 @@ import { AlertsPage } from './pages/AlertsPage.jsx';
 import { LoginPage, RegisterPage } from './pages/AuthPages.jsx';
 import { DashboardPage } from './pages/DashboardPage.jsx';
 import { TransactionsPage } from './pages/TransactionsPage.jsx';
+import { usePageTitle } from './hooks/usePageTitle.js';
 
 function NotFound() {
+  usePageTitle('Page not found');
   return (
     <section className="card">
       <h1>Page not found</h1>

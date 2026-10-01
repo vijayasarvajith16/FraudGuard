@@ -5,6 +5,7 @@ import { ErrorNotice } from '../components/ErrorNotice.jsx';
 import { usePagedList, useResource } from '../hooks/useResource.js';
 import { formatDateTime, formatMoney } from '../lib/format.js';
 import { ACTION_LABELS } from '../lib/transactions.js';
+import { usePageTitle } from '../hooks/usePageTitle.js';
 
 function otpErrorMessage(err) {
   switch (err.code) {
@@ -96,6 +97,7 @@ function OtpPanel({ alert }) {
 }
 
 export function AlertsPage() {
+  usePageTitle('Alerts');
   const { api } = useAuth();
   const fetchPage = useCallback((cursor) => api.listAlerts({ cursor }), [api]);
   const { items, cursor, loading, error, loadMore, reload } = usePagedList(fetchPage);

@@ -7,6 +7,7 @@ import { usePagedList } from '../hooks/useResource.js';
 import { useTransactionPolling } from '../hooks/useTransactionPolling.js';
 import { formatDateTime, formatMoney, formatPercent } from '../lib/format.js';
 import { STATUS_LABELS, STATUSES } from '../lib/transactions.js';
+import { usePageTitle } from '../hooks/usePageTitle.js';
 
 function TransactionRow({ initial }) {
   const { transaction: tx, polling } = useTransactionPolling(initial);
@@ -33,6 +34,7 @@ function TransactionRow({ initial }) {
 }
 
 export function TransactionsPage() {
+  usePageTitle('Transactions');
   const { api } = useAuth();
   const [status, setStatus] = useState('');
   const fetchPage = useCallback((cursor) => api.listTransactions({ status, cursor }), [api, status]);

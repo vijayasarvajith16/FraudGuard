@@ -249,3 +249,16 @@ describe('admin', () => {
     expect(JSON.parse(init.body)).toEqual({ decision: 'APPROVE', note: 'customer confirmed by phone' });
   });
 });
+
+describe('page titles', () => {
+  it('names each page in the browser tab', async () => {
+    mockApi([['GET', /\/api\/alerts\?/, () => ({ items: [], nextCursor: null })]]);
+    const { unmount } = renderApp('/login');
+    await waitFor(() => expect(document.title).toBe('Sign in · FraudGuard'));
+    unmount();
+
+    signIn(ALICE);
+    renderApp('/alerts');
+    await waitFor(() => expect(document.title).toBe('Alerts · FraudGuard'));
+  });
+});
