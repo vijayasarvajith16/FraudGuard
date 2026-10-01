@@ -166,7 +166,7 @@ replay: .venv/.installed ## Replay dataset rows through the gateway (REPLAY_ARGS
 load-rows: .venv/.installed ## Write tests/load/data/rows.json (normal dataset rows for the load test; gitignored)
 	$(DEV_PY) tools/make_load_rows.py $(DATASET)
 
-# k6 inside the kind cluster (docs/performance.md): PROFILE=ramp|backlog, LOAD_PODS=8.
+# k6 inside the kind cluster (docs/performance.md): PROFILE=ramp|backlog|quick-scan|smoke, LOAD_PODS=4.
 load-test: ## Load test through the gateway; records p95, errors and every autoscaler change
 	PYTHON="$(BOOTSTRAP_PYTHON)" bash tests/load/run.sh
 

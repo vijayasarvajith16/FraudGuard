@@ -59,6 +59,14 @@ class Event:
     name: str
     fields: dict[str, int]
     text: str
+    metric: float | None = None  # what the autoscaler last read (watcher), if recorded
+
+
+def quantity(text: str) -> float | None:
+    """Kubernetes quantity as the HPA reports it: "45", "12500m" -> 45.0, 12.5."""
+    if not text:
+        return None
+    return float(text[:-1]) / 1000 if text.endswith("m") else float(text)
 
 
 def read_events(path: Path) -> tuple[int, int, list[Event]]:
@@ -72,8 +80,9 @@ def read_events(path: Path) -> tuple[int, int, list[Event]]:
         elif parts[1] == "end":
             end = t
         elif parts[1] == "hpa":
-            fields = {k: int(v) for k, v in (p.split("=") for p in parts[3:])}
-            events.append(Event(t, "hpa", parts[2], fields, ""))
+            pairs = dict(p.split("=", 1) for p in parts[3:])
+            fields = {k: int(pairs[k]) for k in ("current", "desired", "ready")}
+            events.append(Event(t, "hpa", parts[2], fields, "", quantity(pairs.get("metric", ""))))
         elif parts[1] == "drill":
             events.append(Event(t, "drill", parts[2], {}, " ".join(parts[3:])))
     return start, end, events
@@ -108,6 +117,13 @@ def clock(t: float, start: int) -> str:
     return f"{sign}{abs(s) // 60}:{abs(s) % 60:02d}"
 
 
+def cpu(container: str, d: int, at: int) -> float | None:
+    """Average cores used by a container (all its pods) over the last d seconds."""
+    return value(
+        f'sum(rate(container_cpu_usage_seconds_total{{namespace="fraudguard", container="{container}"}}[{d}s]))', at
+    )
+
+
 def stage_row(run: str, sel: str, label: str, t0: int, t1: int, target: float, pods: int) -> dict:
     d = t1 - t0
     total = value(f"sum(increase(k6_http_reqs_total{{{sel}}}[{d}s]))", t1)
@@ -115,6 +131,7 @@ def stage_row(run: str, sel: str, label: str, t0: int, t1: int, target: float, p
     hist = f"sum(increase(k6_http_req_duration_seconds{{{sel}}}[{d}s]))"
     qs_hpa = 'horizontalpodautoscaler="quick-scan-service"'
     ds_hpa = 'horizontalpodautoscaler="deep-scan-service"'
+    tx_hpa = 'horizontalpodautoscaler="transaction-service"'
     return {
         "stage": label,
         "target_rps": target * pods,
@@ -135,11 +152,9 @@ def stage_row(run: str, sel: str, label: str, t0: int, t1: int, target: float, p
             f'scan_latency_seconds_bucket{{app_kubernetes_io_name="quick-scan-service"}}[{d}s])))',
             t1,
         ),
-        "transaction_cpu": value(
-            "sum(rate(container_cpu_usage_seconds_total"
-            f'{{namespace="fraudguard", container="transaction-service"}}[{d}s]))',
-            t1,
-        ),
+        "transaction_pods": value(f"max_over_time({REPLICAS}{{{tx_hpa}}}[{d}s])", t1),
+        "transaction_cpu": cpu("transaction-service", d, t1),
+        "mongodb_cpu": cpu("mongodb", d, t1),
         "deep_share": value(
             f'sum(increase(transactions_created_total{{status="UNDER_REVIEW"}}[{d}s]))'
             f" / sum(increase(transactions_created_total[{d}s]))",
@@ -161,19 +176,24 @@ def scaling_rows(sel: str, start: int, events: list[Event]) -> list[dict]:
             continue
         prev = last.get(e.name)
         last[e.name] = e.fields
-        if prev is None:
+        if prev is None or e.t < start:  # first sighting, or scale-down left over from an earlier run
             continue
         load = value(f"sum(rate(k6_http_reqs_total{{{sel}}}[30s]))", e.t)
-        if e.name == "quick-scan-service":
-            m = value(
-                'kube_horizontalpodautoscaler_status_target_metric{horizontalpodautoscaler="quick-scan-service", '
-                'metric_name="cpu", metric_target_type="utilization"}',
-                e.t,
-            )
+        if e.name == "deep-scan-service":
+            if e.metric is not None:
+                metric = f"{num(e.metric, '{:.1f}')} waiting messages per pod (target 20)"
+            else:
+                m = value('sum(rabbitmq_detailed_queue_messages_ready{queue="transactions.flagged"})', e.t)
+                metric = f"{num(m)} messages waiting in total"
+        else:  # CPU autoscalers: quick-scan, transaction-service
+            m = e.metric
+            if m is None:
+                m = value(
+                    f'kube_horizontalpodautoscaler_status_target_metric{{horizontalpodautoscaler="{e.name}", '
+                    'metric_name="cpu", metric_target_type="utilization"}',
+                    e.t,
+                )
             metric = f"CPU {num(m)}% of request (target 60%)"
-        else:
-            m = value('sum(rabbitmq_detailed_queue_messages_ready{queue="transactions.flagged"})', e.t)
-            metric = f"{num(m)} messages waiting (target 20 per pod)"
         for key, label in (("desired", "desired"), ("ready", "ready")):
             if e.fields[key] != prev[key]:
                 rows.append(
@@ -223,20 +243,34 @@ def render(
     out = [
         f"# Load test {run} ({profile_name}, {pods} k6 pods)",
         "",
-        "| Stage | Target | Achieved | p50 | p95 | p99 | Errors | quick-scan pods | quick-scan CPU (HPA) "
-        "| quick-scan scoring p95 | transaction-service CPU | To deep-scan | Queue max | deep-scan pods |",
-        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
+        "Client side (k6, through the ingress):",
+        "",
+        "| Stage | Target | Achieved | p50 | p95 | p99 | Errors |",
+        "|---|---|---|---|---|---|---|",
     ]
     for s in stages:
         out.append(
             f"| {s['stage']} | {s['target_rps']:.0f}/s | {num(s['achieved_rps'], '{:.1f}')}/s | {ms(s['p50'])} "
-            f"| {ms(s['p95'])} | {ms(s['p99'])} | {pct(s['error_rate'])} | {num(s['quick_scan_pods'])} "
-            f"| {num(s['quick_scan_cpu'])}% | {ms(s['quick_scan_p95'])} | {num(s['transaction_cpu'], '{:.2f}')} cores "
-            f"| {pct(s['deep_share'])} | {num(s['queue_max'])} | {num(s['deep_scan_pods'])} |"
+            f"| {ms(s['p95'])} | {ms(s['p99'])} | {pct(s['error_rate'])} |"
         )
     out += [
         "",
-        f"Whole run: {num(totals['requests'])} transfers, p95 {ms(totals['p95'])}, p99 {ms(totals['p99'])}, "
+        "Server side (maximum replicas and average CPU over each stage):",
+        "",
+        "| Stage | transaction-service pods | transaction-service CPU | MongoDB CPU | quick-scan pods "
+        "| quick-scan CPU (HPA) | quick-scan scoring p95 | To deep-scan | Queue max | deep-scan pods |",
+        "|---|---|---|---|---|---|---|---|---|---|",
+    ]
+    for s in stages:
+        out.append(
+            f"| {s['stage']} | {num(s['transaction_pods'])} | {num(s['transaction_cpu'], '{:.2f}')} "
+            f"| {num(s['mongodb_cpu'], '{:.2f}')} | {num(s['quick_scan_pods'])} | {num(s['quick_scan_cpu'])}% "
+            f"| {ms(s['quick_scan_p95'])} | {pct(s['deep_share'])} | {num(s['queue_max'])} "
+            f"| {num(s['deep_scan_pods'])} |"
+        )
+    out += [
+        "",
+        f"Whole run: {num(totals['requests'])} requests, p95 {ms(totals['p95'])}, p99 {ms(totals['p99'])}, "
         f"errors {pct(totals['error_rate'])}, dropped iterations {num(totals['dropped'])}.",
         "",
         "## Autoscaling events",
