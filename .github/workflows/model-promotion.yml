@@ -188,6 +188,30 @@ jobs:
       QUICK: ${{ needs.evaluate.outputs.quick }}
       DEEP: ${{ needs.evaluate.outputs.deep }}
     steps:
+      # A job that names a missing environment makes GitHub create it without protection rules, so
+      # it would start without an approval. Refuse unless the gate exists, before touching anything.
+      - name: Require the approval gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HAS_REGISTRY_TOKEN: ${{ secrets.MLFLOW_TRACKING_PASSWORD != '' }}
+        run: |
+          status="$(curl -sS -o "$RUNNER_TEMP/environment.json" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/environments/model-registry")"
+          if [ "$status" != 200 ]; then
+            echo "::error::cannot read environment model-registry (HTTP $status): set it up first (docs/mlops.md)"
+            exit 1
+          fi
+          if ! python3 -c 'import json, sys; rules = json.load(open(sys.argv[1])).get("protection_rules") or []; sys.exit(0 if any(r.get("type") == "required_reviewers" for r in rules) else 1)' \
+            "$RUNNER_TEMP/environment.json"; then
+            echo "::error::environment model-registry has no required reviewers: refusing to promote without an approval (docs/mlops.md)"
+            exit 1
+          fi
+          if [ "$HAS_REGISTRY_TOKEN" != true ]; then
+            echo "::error::environment model-registry has no MLFLOW_TRACKING_PASSWORD secret (docs/mlops.md)"
+            exit 1
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
