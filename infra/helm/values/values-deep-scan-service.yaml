@@ -16,7 +16,7 @@ config:
   MLFLOW_TRACKING_URI: https://dagshub.com/vijayasarvajith16/fraudguard.mlflow
   # The model version running here is pinned in Git. The model-promotion workflow rewrites this
   # line when it promotes a version (docs/mlops.md); Argo CD then rolls the pods.
-  MODEL_URI: models:/fraudguard-deep-scan/2
+  MODEL_URI: models:/fraudguard-deep-scan/3
   GIT_PYTHON_REFRESH: quiet
   MLFLOW_DISABLE_AGENT_HINT: "1"
   TIER_MEDIUM_MIN: "0.30"
