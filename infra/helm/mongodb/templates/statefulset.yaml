@@ -71,12 +71,14 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 15
             failureThreshold: 6
+          # Liveness is deliberately cheap: a mongosh exec starts a Node.js runtime and timed out under
+          # host CPU contention, which got a healthy database killed. Readiness keeps the full check.
           livenessProbe:
-            exec:
-              command: [mongosh, --quiet, --eval, "db.adminCommand('ping').ok"]
-            initialDelaySeconds: 60
+            tcpSocket:
+              port: mongodb
+            initialDelaySeconds: 30
             periodSeconds: 20
-            timeoutSeconds: 15
+            timeoutSeconds: 5
             failureThreshold: 6
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

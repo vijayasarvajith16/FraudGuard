@@ -134,6 +134,10 @@ cluster can run side by side, but there is no need to: stop one with `make down`
   install timeout (it also avoids Docker Hub's anonymous rate limit). They are exported for
   `linux/amd64` only: with Docker Desktop's containerd image store, `kind load docker-image` on a
   multi-platform image fails with "content digest … not found".
+- **Data-store liveness probes are plain TCP checks.** The first version ran `mongosh` and
+  `rabbitmq-diagnostics` (a Node.js runtime and an Erlang VM per probe); under host CPU contention
+  both timed out and Kubernetes killed healthy data stores. The thorough checks stay as readiness
+  probes, where a slow answer only delays traffic instead of restarting the database.
 - **Re-running `make k8s-up` changes nothing** when nothing changed. Local images are built without
   provenance attestations because, with them, every cached build gets a new image id, which made
   each re-run reload all images and roll every pod (9 minutes). Unchanged images are now
