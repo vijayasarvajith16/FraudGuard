@@ -1,5 +1,6 @@
 # ML pipeline checks: lint and the sanity tests on synthetic data with tiny models.
-# Real training happens in Colab (ml/notebooks); CI never trains or touches the dataset.
+# Real training happens in Colab (ml/notebooks) and CI never trains. Evaluation on the real
+# (checksum-verified) dataset and promotion run in model-promotion.yml.
 name: ml
 
 on:
