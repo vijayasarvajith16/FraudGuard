@@ -4,8 +4,11 @@
 // rate-limits each client IP to 20 requests/s (contract §8), so every pod stays at or below 18/s
 // and the total load scales with the number of pods. Each pod:
 //   - registers and funds its own users, then waits for START_AT so all pods ramp together;
-//   - sends transfers in a ring between its users (sender i pays i+1, so balances stay level),
-//     each with a real dataset row's features (normal rows only: tools/make_load_rows.py);
+//   - sends transfers from its users in turn to a random other user of the pod (balances stay level
+//     on average), each with a real dataset row's features (normal rows only:
+//     tools/make_load_rows.py). Enough users that no account is unrealistically hot: each transfer
+//     updates two wallets in MongoDB transactions, and a few accounts sending several transfers a
+//     second mostly produce write conflicts (docs/performance.md).
 //   - pushes its metrics to Prometheus (remote write, native histograms): p95 across pods is exact,
 //     and Grafana shows the client-side view next to the services.
 import http from 'k6/http';
@@ -17,7 +20,7 @@ const BASE_URL = __ENV.BASE_URL || 'http://traefik.traefik.svc.cluster.local';
 const POD = __ENV.JOB_COMPLETION_INDEX || '0';
 const RUN_ID = __ENV.RUN_ID || `${Date.now()}`;
 const START_AT = Number(__ENV.START_AT || 0); // epoch milliseconds
-const USERS = Number(__ENV.USERS_PER_POD || 4);
+const USERS = Number(__ENV.USERS_PER_POD || 8);
 const DEPOSIT = 100000;
 const PASSWORD = 'Load-test-2026';
 const MAX_RATE_PER_POD = 18;
@@ -53,7 +56,7 @@ export const options = {
   summaryTrendStats: ['avg', 'med', 'p(95)', 'p(99)', 'max'],
 };
 
-function call(method, path, body, token, expected) {
+function call(method, path, body, token, ok) {
   const params = {
     headers: { 'Content-Type': 'application/json' },
     responseType: 'text',
@@ -62,7 +65,7 @@ function call(method, path, body, token, expected) {
   if (token) params.headers.Authorization = `Bearer ${token}`;
   for (let attempt = 1; attempt <= 5; attempt++) {
     const res = http.request(method, `${BASE_URL}${path}`, body && JSON.stringify(body), params);
-    if (res.status === expected) return res;
+    if (ok.includes(res.status)) return res;
     if (res.status !== 429 && res.status < 500) fail(`${method} ${path}: HTTP ${res.status} ${res.body}`);
     sleep(attempt);
   }
@@ -70,12 +73,17 @@ function call(method, path, body, token, expected) {
 }
 
 export function setup() {
+  // Registration and login hash passwords (bcrypt cost 12, CPU-bound, auth-service capped at 500m):
+  // staggered starts keep the queue at auth-service well under the gateway's 10 s upstream timeout.
+  sleep(Number(POD) * 2);
   const users = [];
   for (let i = 0; i < USERS; i++) {
     const email = `load-${RUN_ID}-${POD}-${i}@example.com`;
-    call('POST', '/api/auth/register', { email, password: PASSWORD, name: `Load ${POD}-${i}` }, null, 201);
-    const token = call('POST', '/api/auth/login', { email, password: PASSWORD }, null, 200).json('accessToken');
-    call('POST', '/api/wallet/deposit', { amount: DEPOSIT }, token, 200);
+    // 409: an earlier attempt timed out at the gateway but did register (the address is unique to
+    // this run, pod and user).
+    call('POST', '/api/auth/register', { email, password: PASSWORD, name: `Load ${POD}-${i}` }, null, [201, 409]);
+    const token = call('POST', '/api/auth/login', { email, password: PASSWORD }, null, [200]).json('accessToken');
+    call('POST', '/api/wallet/deposit', { amount: DEPOSIT }, token, [200]);
     users.push({ email, token });
   }
   // Access tokens live 15 minutes (contract §1): profiles stay well inside that.
@@ -87,7 +95,8 @@ export function setup() {
 export default function (data) {
   const n = exec.scenario.iterationInTest;
   const sender = data.users[n % data.users.length];
-  const recipient = data.users[(n + 1) % data.users.length];
+  const offset = 1 + Math.floor(Math.random() * (data.users.length - 1));
+  const recipient = data.users[(n + offset) % data.users.length];
   const features = rows[Math.floor(Math.random() * rows.length)];
   const res = http.post(
     `${BASE_URL}/api/transactions`,

@@ -21,7 +21,7 @@ from pathlib import Path
 
 CONTEXT = "kind-fraudguard"
 PROXY = "/api/v1/namespaces/monitoring/services/prometheus-server:80/proxy/api/v1/"
-REQ = 'name="POST /api/transactions"'
+DEFAULT_REQUEST = "POST /api/transactions"  # a profile's "request" names another (k6 name tag)
 REPLICAS = "kube_horizontalpodautoscaler_status_current_replicas"
 
 
@@ -108,9 +108,8 @@ def clock(t: float, start: int) -> str:
     return f"{sign}{abs(s) // 60}:{abs(s) % 60:02d}"
 
 
-def stage_row(run: str, label: str, t0: int, t1: int, target: float, pods: int) -> dict:
+def stage_row(run: str, sel: str, label: str, t0: int, t1: int, target: float, pods: int) -> dict:
     d = t1 - t0
-    sel = f'testid="{run}", {REQ}'
     total = value(f"sum(increase(k6_http_reqs_total{{{sel}}}[{d}s]))", t1)
     failed = value(f'sum(increase(k6_http_reqs_total{{{sel}, expected_response="false"}}[{d}s]))', t1) or 0.0
     hist = f"sum(increase(k6_http_req_duration_seconds{{{sel}}}[{d}s]))"
@@ -153,7 +152,7 @@ def stage_row(run: str, label: str, t0: int, t1: int, target: float, pods: int) 
     }
 
 
-def scaling_rows(run: str, start: int, events: list[Event]) -> list[dict]:
+def scaling_rows(sel: str, start: int, events: list[Event]) -> list[dict]:
     """One row per change of desired replicas (the decision) or ready replicas (capacity online)."""
     rows, last = [], {}
     for e in events:
@@ -164,7 +163,7 @@ def scaling_rows(run: str, start: int, events: list[Event]) -> list[dict]:
         last[e.name] = e.fields
         if prev is None:
             continue
-        load = value(f'sum(rate(k6_http_reqs_total{{testid="{run}", {REQ}}}[30s]))', e.t)
+        load = value(f"sum(rate(k6_http_reqs_total{{{sel}}}[30s]))", e.t)
         if e.name == "quick-scan-service":
             m = value(
                 'kube_horizontalpodautoscaler_status_target_metric{horizontalpodautoscaler="quick-scan-service", '
@@ -274,9 +273,9 @@ def main(argv: list[str] | None = None) -> int:
     profile = json.loads(args.profile.read_text(encoding="utf-8"))
     start, end, events = read_events(args.events)
     run = args.run_id
-    stages = [stage_row(run, *w, args.pods) for w in stage_windows(profile, start)]
+    sel = f'testid="{run}", name="{profile.get("request", DEFAULT_REQUEST)}"'
+    stages = [stage_row(run, sel, *w, args.pods) for w in stage_windows(profile, start)]
     d = end - start
-    sel = f'testid="{run}", {REQ}'
     hist = f"sum(increase(k6_http_req_duration_seconds{{{sel}}}[{d}s]))"
     total = value(f"sum(increase(k6_http_reqs_total{{{sel}}}[{d}s]))", end)
     failed = value(f'sum(increase(k6_http_reqs_total{{{sel}, expected_response="false"}}[{d}s]))', end) or 0.0
@@ -287,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         "error_rate": None if not total else failed / total,
         "dropped": value(f'sum(increase(k6_dropped_iterations_total{{testid="{run}"}}[{d}s]))', end) or 0.0,
     }
-    scaling = scaling_rows(run, start, events)
+    scaling = scaling_rows(sel, start, events)
     backlog = backlog_summary(start, end, events)
 
     text = render(run, args.profile.stem, args.pods, start, stages, scaling, totals, backlog)

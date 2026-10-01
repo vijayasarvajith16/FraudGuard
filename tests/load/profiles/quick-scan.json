@@ -1,0 +1,18 @@
+{
+  "description": "quick-scan alone: /score called directly inside the cluster, in steps up to 320 requests/s, to measure per-pod capacity and the CPU autoscaler (1 to 4 pods). Targets are per k6 pod.",
+  "script": "score.js",
+  "request": "POST /score",
+  "stages": [
+    { "duration": "20s", "target": 20 },
+    { "duration": "90s", "target": 20, "label": "step 1" },
+    { "duration": "15s", "target": 40 },
+    { "duration": "90s", "target": 40, "label": "step 2" },
+    { "duration": "15s", "target": 80 },
+    { "duration": "90s", "target": 80, "label": "step 3" },
+    { "duration": "15s", "target": 120 },
+    { "duration": "90s", "target": 120, "label": "step 4" },
+    { "duration": "15s", "target": 160 },
+    { "duration": "120s", "target": 160, "label": "step 5" },
+    { "duration": "15s", "target": 0 }
+  ]
+}
