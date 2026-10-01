@@ -17,6 +17,11 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    ignore:
+      # Driver 7.x fails its connection handshake inside Jest (see services/auth-service/README.md);
+      # its first Dependabot PR failed the unit tests exactly that way. Minor/patch updates still flow.
+      - dependency-name: mongodb
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
@@ -70,6 +75,14 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    # Runtime lines are chosen deliberately and moved by hand; patches within them still flow.
+    ignore:
+      - dependency-name: node # stay on the chosen LTS line (22)
+        update-types: ["version-update:semver-major"]
+      - dependency-name: nginxinc/nginx-unprivileged # even minors are nginx "stable", odd are "mainline"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: python # 3.13 matches the Colab training runtime (docs/ml-results.md)
+        update-types: ["version-update:semver-minor"]
     groups:
       base-images:
         patterns: ["*"]

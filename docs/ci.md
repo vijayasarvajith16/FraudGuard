@@ -51,6 +51,15 @@ yanked).
 trained it, so they are bumped by hand in `ml/` and both scan services together, followed by a
 retrain.
 
+Deliberate version lines are also moved by hand (patches within them still arrive automatically):
+
+| Dependency | Ignored | Why |
+|---|---|---|
+| `mongodb` (npm) | major | 7.x fails its handshake inside Jest. Its first Dependabot PRs failed the unit tests exactly that way, which is the pipeline doing its job. |
+| `node` (images) | major | Stay on the chosen LTS line (22). |
+| `nginxinc/nginx-unprivileged` | minor | Even minors are nginx *stable*, odd ones *mainline*; the gateway and frontend track stable. |
+| `python` (images) | minor | 3.13 matches the Colab training runtime. |
+
 ## Branch protection (recommended settings for `main`)
 
 *Settings → Rules → Rulesets → New branch ruleset*, target the default branch:
