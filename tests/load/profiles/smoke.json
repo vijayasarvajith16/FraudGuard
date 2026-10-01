@@ -1,0 +1,8 @@
+{
+  "description": "One minute of light load: checks the whole pipeline (k6 pods, gateway, remote write, report) before a long run.",
+  "stages": [
+    { "duration": "15s", "target": 3 },
+    { "duration": "45s", "target": 3, "label": "smoke" },
+    { "duration": "5s", "target": 0 }
+  ]
+}

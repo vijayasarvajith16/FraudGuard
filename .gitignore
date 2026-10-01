@@ -36,6 +36,9 @@ htmlcov/
 # ---- ML: datasets, model binaries, local tracking ----
 ml/data/*
 !ml/data/.gitkeep
+# Load-test inputs derived from the dataset (tools/make_load_rows.py) and run outputs.
+tests/load/data/
+tests/load/results/
 *.pkl
 *.joblib
 ml/artifacts/

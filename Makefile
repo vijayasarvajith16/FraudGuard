@@ -26,7 +26,7 @@ PY_STAMPS   := $(addsuffix /.venv/.installed,$(PY_SERVICES))
 LOAD_ENV = test -f .env || { echo "No .env: run 'make env' first."; exit 1; }; set -a; . ./.env; set +a
 
 .PHONY: help env install hooks up down ps logs mongo-users test lint e2e test-integration gateway-test \
-        ml-test ml-lint replay demo-samples secrets-scan clean-deps test-monitoring \
+        ml-test ml-lint replay demo-samples load-rows load-test secrets-scan clean-deps test-monitoring \
         k8s-up k8s-status k8s-argocd k8s-grafana k8s-prometheus k8s-stop k8s-start k8s-down
 
 help: ## List available targets
@@ -162,6 +162,13 @@ REPLAY_ARGS ?= --count 100 --rate 2 --fraud-ratio 0.2
 replay: .venv/.installed ## Replay dataset rows through the gateway (REPLAY_ARGS="--count 50 --fraud-ratio 0.1")
 	@$(LOAD_ENV); \
 	$(DEV_PY) tools/replay.py $(DATASET) --gateway "http://127.0.0.1:$${GATEWAY_HOST_PORT:-8080}" $(REPLAY_ARGS)
+
+load-rows: .venv/.installed ## Write tests/load/data/rows.json (normal dataset rows for the load test; gitignored)
+	$(DEV_PY) tools/make_load_rows.py $(DATASET)
+
+# k6 inside the kind cluster (docs/performance.md): PROFILE=ramp|backlog, LOAD_PODS=8.
+load-test: ## Load test through the gateway; records p95, errors and every autoscaler change
+	PYTHON="$(BOOTSTRAP_PYTHON)" bash tests/load/run.sh
 
 demo-samples: .venv/.installed ## Regenerate frontend/src/demo/sampleFeatures.json from the running scan services
 	@$(LOAD_ENV); \

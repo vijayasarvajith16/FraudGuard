@@ -14,6 +14,11 @@ server:
   resources:
     requests: { cpu: 100m, memory: 256Mi }
     limits: { cpu: "1", memory: 768Mi }
+  extraFlags:
+    - web.enable-lifecycle # the chart's default: configmap-reload triggers /-/reload
+    # The k6 load test (tests/load) pushes its client-side metrics here as native histograms, so
+    # Grafana shows request latency and errors next to the services, and p95 is exact across pods.
+    - web.enable-remote-write-receiver
 
 alertmanager:
   enabled: false # rules still evaluate and show as firing in Prometheus and Grafana
