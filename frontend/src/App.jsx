@@ -1,6 +1,7 @@
 import { Link, Route, Routes } from 'react-router';
 import { RequireAdmin, RequireAuth } from './components/Guards.jsx';
 import { Layout } from './components/Layout.jsx';
+import { IconSearch } from './components/icons.jsx';
 import { AdminPage } from './pages/AdminPage.jsx';
 import { AlertsPage } from './pages/AlertsPage.jsx';
 import { LoginPage, RegisterPage } from './pages/AuthPages.jsx';
@@ -11,9 +12,14 @@ import { usePageTitle } from './hooks/usePageTitle.js';
 function NotFound() {
   usePageTitle('Page not found');
   return (
-    <section className="card">
+    <section className="card empty-state rise">
+      <span className="empty-icon tone-info" aria-hidden="true">
+        <IconSearch size={26} />
+      </span>
       <h1>Page not found</h1>
-      <Link to="/">Back to your wallet</Link>
+      <Link to="/" className="btn">
+        Back to your wallet
+      </Link>
     </section>
   );
 }

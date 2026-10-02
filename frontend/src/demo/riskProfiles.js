@@ -8,21 +8,25 @@ export const RISK_PROFILES = [
   {
     id: 'default',
     label: 'Default',
+    short: 'Default',
     hint: 'Sends no feature vector: the server builds a neutral one, so this is normally approved instantly.',
   },
   {
     id: 'normal',
     label: 'Normal sample',
+    short: 'Normal',
     hint: 'A real, legitimate card transaction. Expected: approved instantly by the quick scan.',
   },
   {
     id: 'suspicious',
     label: 'Suspicious sample',
+    short: 'Suspicious',
     hint: 'A real transaction the quick scan flags and the deep scan rates medium or high risk. Expected: a notification or an OTP step-up.',
   },
   {
     id: 'fraud',
     label: 'Known fraud sample',
+    short: 'Known fraud',
     hint: 'A real fraudulent transaction. Expected: blocked, account frozen and sent to manual review.',
   },
 ];

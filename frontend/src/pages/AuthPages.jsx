@@ -1,21 +1,52 @@
 import { useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { useAuth } from '../auth/context.js';
+import { TierBadge } from '../components/Badges.jsx';
 import { ErrorNotice } from '../components/ErrorNotice.jsx';
+import { IconLayers, IconScan, IconSliders, LogoMark } from '../components/icons.jsx';
 import { usePageTitle } from '../hooks/usePageTitle.js';
+
+const STAGES = [
+  { name: 'Quick scan', text: 'Every transfer, in milliseconds', icon: IconScan },
+  { name: 'Deep scan', text: 'Only the flagged ones', icon: IconLayers },
+  { name: 'Mitigation', text: 'Log, notify, one-time code or freeze', icon: IconSliders },
+];
 
 function AuthShell({ title, subtitle, children }) {
   return (
     <main className="auth">
-      <div className="auth-card card">
+      <section className="auth-hero" aria-label="About FraudGuard">
         <div className="brand brand-large">
-          <img src="/favicon.svg" alt="" width="28" height="28" />
+          <LogoMark size={34} />
           FraudGuard
         </div>
-        <h1>{title}</h1>
-        <p className="muted">{subtitle}</p>
-        {children}
-      </div>
+        <p className="auth-headline">Every transfer is screened before any money moves.</p>
+        <ol className="auth-flow">
+          {STAGES.map(({ name, text, icon: Glyph }) => (
+            <li key={name}>
+              <span className="auth-node" aria-hidden="true">
+                <Glyph size={20} />
+              </span>
+              <span>
+                <strong>{name}</strong>
+                <span className="muted small">{text}</span>
+              </span>
+            </li>
+          ))}
+        </ol>
+        <div className="auth-tiers" aria-label="Risk tiers">
+          {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map((tier) => (
+            <TierBadge key={tier} tier={tier} />
+          ))}
+        </div>
+      </section>
+      <section className="auth-panel">
+        <div className="auth-card">
+          <h1>{title}</h1>
+          <p className="muted">{subtitle}</p>
+          {children}
+        </div>
+      </section>
     </main>
   );
 }
@@ -75,14 +106,15 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
           />
         </label>
-        <button type="submit" className="btn btn-primary" disabled={busy}>
+        <button type="submit" className="btn btn-primary btn-wide" disabled={busy}>
+          {busy && <span className="spinner" aria-hidden="true" />}
           {busy ? 'Signing in...' : 'Sign in'}
         </button>
       </form>
       <ErrorNotice error={error}>
         {error?.code === 'INVALID_CREDENTIALS' ? 'Wrong email or password.' : error?.message}
       </ErrorNotice>
-      <p className="muted small">
+      <p className="muted small auth-switch">
         New here? <Link to="/register">Create an account</Link>
       </p>
     </AuthShell>
@@ -146,14 +178,15 @@ export function RegisterPage() {
             8 to 128 characters, with at least one letter and one digit.
           </span>
         </div>
-        <button type="submit" className="btn btn-primary" disabled={busy}>
+        <button type="submit" className="btn btn-primary btn-wide" disabled={busy}>
+          {busy && <span className="spinner" aria-hidden="true" />}
           {busy ? 'Creating account...' : 'Create account'}
         </button>
       </form>
       <ErrorNotice error={error}>
         {error?.code === 'EMAIL_TAKEN' ? 'An account with this email already exists.' : error?.message}
       </ErrorNotice>
-      <p className="muted small">
+      <p className="muted small auth-switch">
         Already registered? <Link to="/login">Sign in</Link>
       </p>
     </AuthShell>
