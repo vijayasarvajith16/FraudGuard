@@ -126,9 +126,9 @@ flowchart LR
 
 ## Quick start (docker compose)
 
-Needs Docker, GNU make and Python 3.12+ (on Windows, run the commands from Git Bash). The scan
-services download their models from the public MLflow registry at startup, so an internet
-connection is needed.
+Needs Docker, GNU make and Python 3.12+. On Windows, run the commands from Git Bash; make is not
+included there (`winget install ezwinports.make`). The scan services download their models from the
+public MLflow registry at startup, so an internet connection is needed.
 
 ```bash
 git clone https://github.com/vijayasarvajith16/FraudGuard.git
@@ -137,11 +137,16 @@ make env    # creates .env with generated secrets (never committed)
 make up     # builds and starts 9 containers and waits until all are healthy
 ```
 
+The first `make up` builds seven images and takes several minutes; later runs take about a minute.
+
 Then open **http://localhost:8080**, register two users, deposit money and send a transfer. To see
 the admin review queue, log in as `ADMIN_EMAIL` with `ADMIN_PASSWORD` from `.env`.
 
-If a port is already taken on your machine, change the `*_HOST_PORT` values in `.env` (the UI is on
-`GATEWAY_HOST_PORT`) and run `make up` again. Stop with `make down` (data is kept).
+The stack publishes ports 8080, 27017, 5672, 15672, 3001–3003, 8001 and 8002 on 127.0.0.1. If
+`make up` stops with "ports are not available", change the matching `*_HOST_PORT` value in `.env`
+(the UI is on `GATEWAY_HOST_PORT`) and run `make up` again. To run a second checkout next to this
+one, `export COMPOSE_PROJECT_NAME=<another name>` in its shell first, so it gets its own containers
+and volumes. Stop with `make down` (data is kept).
 
 To stream real dataset rows through the system, including fraud, download `creditcard.csv` from
 [Kaggle](https://www.kaggle.com/datasets/mlg-ulb/creditcardfraud) to `ml/data/creditcard.csv`, then
