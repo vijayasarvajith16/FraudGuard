@@ -11,7 +11,12 @@ export default defineConfig(({ mode }) => {
       // Same-origin /api in development too: the dev server forwards to the gateway (contracts §8.1).
       proxy: { '/api': { target: env.GATEWAY_URL || 'http://localhost:8080' } },
     },
-    build: { target: 'es2022', sourcemap: false },
+    build: {
+      target: 'es2022',
+      sourcemap: false,
+      // Never inline fonts as data: URIs; the CSP allows fonts from 'self' only (nginx headers).
+      assetsInlineLimit: (file) => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined),
+    },
     test: {
       environment: 'jsdom',
       setupFiles: ['./tests/setup.js'],
