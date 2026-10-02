@@ -36,7 +36,7 @@ describe('transfer form', () => {
     const fetchMock = await openDashboard([
       ['POST', /\/api\/transactions$/, () => json(201, { transaction: makeTx({ status: 'ACCOUNT_FROZEN' }) })],
     ]);
-    await user.selectOptions(form().getByLabelText('Risk profile'), 'fraud');
+    await user.click(form().getByRole('radio', { name: 'Known fraud' }));
 
     const amountInput = form().getByLabelText('Amount (USD)');
     const prefilled = amountInput.value;

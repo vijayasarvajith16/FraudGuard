@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 import { App } from './App.jsx';
 import { AuthProvider } from './auth/AuthProvider.jsx';
+import '@fontsource-variable/manrope';
 import './styles.css';
 
 createRoot(document.getElementById('root')).render(

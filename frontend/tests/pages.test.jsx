@@ -111,9 +111,12 @@ describe('transactions page', () => {
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
 
     await user.click(screen.getByText('risk 99.8%').closest('button'));
-    expect(screen.getByText('fraud probability 99.8%; tier CRITICAL; model v2')).toBeInTheDocument();
+    const details = within(screen.getByText('risk 99.8%').closest('li'));
+    expect(details.getByText('Fraud probability')).toBeInTheDocument();
+    expect(details.getByText('Tier CRITICAL · model v2')).toBeInTheDocument();
+    expect(details.getByRole('meter', { name: 'Fraud probability' })).toHaveAttribute('aria-valuenow', '0.998');
 
-    await user.selectOptions(screen.getByRole('combobox'), 'ACCOUNT_FROZEN');
+    await user.click(screen.getByRole('radio', { name: 'Account frozen' }));
     await waitFor(() => expect(screen.queryByText('Lunch')).not.toBeInTheDocument());
     expect(callsTo(fetchMock, 'GET', /status=ACCOUNT_FROZEN/)).toHaveLength(1);
   });

@@ -24,6 +24,18 @@ export const STATUS_LABELS = {
   BLOCKED: 'Blocked',
 };
 
+/** Colour family per status and risk tier (ok, info, warn, danger). */
+export const STATUS_TONE = {
+  PENDING: 'info',
+  UNDER_REVIEW: 'info',
+  APPROVED: 'ok',
+  AWAITING_OTP: 'warn',
+  ACCOUNT_FROZEN: 'danger',
+  BLOCKED: 'danger',
+};
+
+export const TIER_TONE = { LOW: 'ok', MEDIUM: 'info', HIGH: 'warn', CRITICAL: 'danger' };
+
 export const ACTION_LABELS = {
   NONE: 'None (quick-scan approved)',
   LOG: 'Logged for audit',

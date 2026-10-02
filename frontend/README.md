@@ -1,16 +1,16 @@
 # FraudGuard frontend
 
-React 19 single-page app (Vite 8, React Router 8, plain CSS, no UI library). It talks **only** to the
+React 19 single-page app (Vite 8, React Router 8, plain CSS, no UI or chart library). It talks **only** to the
 gateway's `/api/*` routes (docs/contracts.md §8, §8.1): never to a scan service, RabbitMQ or an
 `/internal` route.
 
-| Route                 | Who    | What                                                                                                                   |
-| --------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------- |
-| `/login`, `/register` | anyone | Registration signs straight in.                                                                                        |
-| `/`                   | user   | Wallet, deposit, transfer form with the **Risk profile** selector, live tracker of the last transfer, recent activity. |
-| `/transactions`       | user   | History with status and tier badges, status filter, cursor paging, per-transaction scan details and status history.    |
-| `/alerts`             | user   | Alerts; OTP entry for `OTP_STEP_UP` alerts still `AWAITING_OTP`.                                                       |
-| `/admin`              | admin  | Manual review queue (approve/reject, unfreeze after a rejection) and the active tier policy with a reload button.      |
+| Route                 | Who    | What                                                                                                                                                                |
+| --------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/login`, `/register` | anyone | Registration signs straight in.                                                                                                                                     |
+| `/`                   | user   | Balance card, outcome tiles, quick-scan score and amount charts, deposit, transfer form with the **Risk profile** selector, live pipeline tracker, recent activity. |
+| `/transactions`       | user   | History with status and tier badges, status filter, cursor paging, per-transaction scan details and status history.                                                 |
+| `/alerts`             | user   | Alerts; OTP entry for `OTP_STEP_UP` alerts still `AWAITING_OTP`.                                                                                                    |
+| `/admin`              | admin  | Manual review queue (approve/reject, unfreeze after a rejection) and the active tier policy with a reload button.                                                   |
 
 ## How it behaves
 
@@ -24,6 +24,21 @@ gateway's `/api/*` routes (docs/contracts.md §8, §8.1): never to a scan servic
   "Retry send" reuses it, so a retry never creates a second transfer.
 - **Session.** The JWT is kept in `sessionStorage` and dropped at `exp` or on any `401` (there are no refresh
   tokens, §0.4). Admin-only UI is cosmetic: the services enforce roles.
+
+## Design
+
+- **Dark dashboard theme** in `src/styles.css`: colour, radius and motion tokens on `:root`, one tone system
+  (`ok`, `info`, `warn`, `danger`, `flagged`) shared by badges, icons, meters and alert accents. Icons are
+  inline SVG (`src/components/icons.jsx`); the font is Manrope, bundled from `@fontsource-variable/manrope`
+  (OFL-1.1) so it is served from the app's own origin.
+- **Charts from real data only.** The dashboard computes its figures from the newest 50 transfers
+  (`src/lib/stats.js`): outcome counts, the share the quick scan cleared, quick-scan scores against the
+  model's own threshold, and transfer amounts. Charts are plain SVG/CSS (`src/components/Charts.jsx`).
+- **Motion.** Staggered entrances, growing bars, a line that draws itself, count-up figures and a live
+  pipeline tracker. All of it is off under `prefers-reduced-motion`.
+- **CSP.** The nginx policy allows styles and fonts from `'self'` only, so the build never inlines fonts as
+  `data:` URIs (`assetsInlineLimit` in `vite.config.js`), and dynamic sizes are set through the style
+  object, which the CSP permits.
 
 ## Run
 
