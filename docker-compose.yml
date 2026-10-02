@@ -1,6 +1,8 @@
 # FraudGuard local development stack.
 # Sized for a 16 GB laptop: every container has a memory limit.
 # Ports bind to 127.0.0.1 only. Credentials come from .env (copy .env.example).
+# No fixed container names, so COMPOSE_PROJECT_NAME (or -p) gives a second checkout its own
+# containers, network and volumes. The locally built fraudguard/*:dev image tags are shared.
 
 name: fraudguard
 
@@ -13,7 +15,6 @@ x-logging: &default-logging
 services:
   mongodb:
     image: mongo:7.0
-    container_name: fraudguard-mongodb
     hostname: mongodb
     # Single-node replica set: required for multi-document transactions (docs/contracts.md §0.1).
     entrypoint: ["bash", "/fraudguard/entrypoint.sh"]
@@ -61,7 +62,6 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
-    container_name: fraudguard-rabbitmq
     hostname: fraudguard-rabbitmq
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:-fraudguard}
@@ -90,7 +90,6 @@ services:
     build:
       context: ./services/auth-service
     image: fraudguard/auth-service:dev
-    container_name: fraudguard-auth-service
     environment:
       NODE_ENV: production
       PORT: 3001
@@ -120,7 +119,6 @@ services:
     build:
       context: ./services/transaction-service
     image: fraudguard/transaction-service:dev
-    container_name: fraudguard-transaction-service
     environment:
       NODE_ENV: production
       PORT: 3002
@@ -157,7 +155,6 @@ services:
     build:
       context: ./services/alerting-service
     image: fraudguard/alerting-service:dev
-    container_name: fraudguard-alerting-service
     environment:
       NODE_ENV: production
       PORT: 3003
@@ -199,7 +196,6 @@ services:
     build:
       context: ./services/api-gateway
     image: fraudguard/api-gateway:dev
-    container_name: fraudguard-api-gateway
     environment:
       NGINX_RESOLVER: 127.0.0.11
       # The gateway itself (SPA served through it) and the Vite dev server.
@@ -228,7 +224,6 @@ services:
       args:
         VITE_API_BASE_URL: /api
     image: fraudguard/frontend:dev
-    container_name: fraudguard-frontend
     environment:
       NGINX_CSP_CONNECT_SRC: "'self'"
     deploy:
@@ -245,7 +240,6 @@ services:
     build:
       context: ./services/quick-scan-service
     image: fraudguard/quick-scan-service:dev
-    container_name: fraudguard-quick-scan-service
     environment: &scan-env
       LOG_LEVEL: ${SCAN_LOG_LEVEL:-INFO}
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:?set MLFLOW_TRACKING_URI in .env}
@@ -265,7 +259,6 @@ services:
     build:
       context: ./services/deep-scan-service
     image: fraudguard/deep-scan-service:dev
-    container_name: fraudguard-deep-scan-service
     environment:
       <<: *scan-env
       MODEL_URI: models:/fraudguard-deep-scan@production
