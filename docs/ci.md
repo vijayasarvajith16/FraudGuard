@@ -3,6 +3,25 @@
 GitHub Actions, in `.github/workflows/`. Every service has a thin workflow that runs only when that
 service changes and calls one of two reusable pipelines; repository-wide checks run on every change.
 
+## Status
+
+| Area | Status |
+|---|---|
+| model-promotion | [![model-promotion](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/model-promotion.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/model-promotion.yml) |
+| auth-service | [![auth-service](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/auth-service.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/auth-service.yml) |
+| transaction-service | [![transaction-service](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/transaction-service.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/transaction-service.yml) |
+| alerting-service | [![alerting-service](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/alerting-service.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/alerting-service.yml) |
+| quick-scan-service | [![quick-scan-service](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/quick-scan-service.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/quick-scan-service.yml) |
+| deep-scan-service | [![deep-scan-service](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/deep-scan-service.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/deep-scan-service.yml) |
+| api-gateway | [![api-gateway](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/api-gateway.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/api-gateway.yml) |
+| frontend | [![frontend](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/frontend.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/frontend.yml) |
+| Helm charts | [![helm](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/helm.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/helm.yml) |
+| Terraform | [![terraform](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/terraform.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/terraform.yml) |
+| ml pipeline | [![ml](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/ml.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/ml.yml) |
+| end-to-end (PRs) | [![e2e](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/e2e.yml/badge.svg)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/e2e.yml) |
+| CodeQL | [![codeql](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/codeql.yml) |
+| secret scanning | [![secrets](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/secrets.yml/badge.svg?branch=main)](https://github.com/vijayasarvajith16/FraudGuard/actions/workflows/secrets.yml) |
+
 ## Workflows
 
 | Workflow | Runs on | What it does |

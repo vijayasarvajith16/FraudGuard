@@ -81,8 +81,8 @@ in Grafana within about a minute (Argo CD polls Git, Grafana's sidecar reloads t
 
 ## Alert rules
 
-`infra/monitoring/alert-rules.yaml`. There is no Alertmanager in this local setup, so nothing is
-sent anywhere: firing alerts show in Prometheus (`/alerts`) and on the pipeline dashboard.
+`infra/monitoring/alert-rules.yaml` holds 11 rules. There is no Alertmanager in this local setup, so
+nothing is sent anywhere: firing alerts show in Prometheus (`/alerts`) and on the pipeline dashboard.
 
 | Alert | Fires when | For | Severity |
 |---|---|---|---|
