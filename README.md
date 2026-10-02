@@ -126,7 +126,7 @@ flowchart TB
 
 | | |
 |---|---|
-| ![Transfer screen](docs/images/ui-transfer.jpg)<br/>The app: quick-scan flagged this transfer, deep-scan scored it HIGH (84.9%), so the policy asks for a one-time code and holds the funds. | ![Grafana fraud pipeline dashboard](docs/images/grafana-pipeline.jpg)<br/>Grafana during a replay with 20% fraud rows: model versions, flag rate against the model's expectation, score distributions, risk tiers. |
+| ![Transfer screen](docs/images/ui-transfer.jpg)<br/>The app: quick-scan flagged this transfer (0.517 ≥ 0.389), deep-scan scored it HIGH (70.1%), so the policy asks for a one-time code and holds the funds. | ![Grafana fraud pipeline dashboard](docs/images/grafana-pipeline.jpg)<br/>Grafana during a replay with 20% fraud rows: model versions, flag rate against the model's expectation, score distributions, risk tiers. |
 | ![Argo CD applications](docs/images/argocd.jpg)<br/>Argo CD: all 16 applications deployed from Git, Synced and Healthy. | ![model-promotion workflow run](docs/images/github-actions.jpg)<br/>GitHub Actions: a model promotion (here the rollback to v2), evaluated, approved in the `model-registry` environment, then rolled out. |
 
 ## Quick start (docker compose)
