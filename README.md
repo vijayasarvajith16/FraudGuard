@@ -30,7 +30,7 @@ a laptop.
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     user([Browser]) --> traefik[Traefik ingress]
     traefik --> fe[frontend<br/>React]
     traefik --> gw[api-gateway<br/>nginx]
@@ -83,20 +83,25 @@ stopped by an OTP or a freeze are 97.3% precise. Details, including where the mi
 ## DevOps pipeline
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph dev["Phases 0-8: build and test"]
+        direction LR
         code["Contracts, 7 services, React UI<br/>unit, integration and e2e tests<br/>pre-commit, gitleaks"]
     end
     subgraph ci["Phase 9: CI (GitHub Actions)"]
+        direction LR
         checks["lint, tests (75% coverage floor)<br/>Trivy, CodeQL, gitleaks"] --> images["images to GHCR<br/>tag sha-commit"]
     end
     subgraph gitops["Phases 10 and 12: Kubernetes and GitOps"]
+        direction LR
         bot["release bot pins<br/>the tag in Helm values"] --> argo["Argo CD syncs Helm charts<br/>on kind, in sync waves"]
     end
     subgraph ops["Phase 13: operate"]
+        direction LR
         mon["Prometheus, Grafana, 11 alert rules<br/>autoscalers, k6 load tests"]
     end
     subgraph mlops["Phases 3 and 14: MLOps"]
+        direction LR
         train["Colab training<br/>MLflow on DagsHub"] --> promo["model-promotion workflow<br/>evaluate, approve, pin version"]
     end
     tf["Phase 11: Terraform, Oracle Cloud<br/>written and validated, not applied"]
