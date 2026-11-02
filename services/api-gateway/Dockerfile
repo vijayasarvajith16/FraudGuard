@@ -2,7 +2,7 @@
 
 # Official unprivileged image (stable branch): runs as uid 101, listens on 8080, renders
 # /etc/nginx/templates/*.template with envsubst and runs /docker-entrypoint.d/*.sh at startup.
-FROM nginxinc/nginx-unprivileged:1.30.5-alpine
+FROM nginxinc/nginx-unprivileged:1.30.6-alpine
 
 # Defaults suit docker compose; Kubernetes overrides the resolver, the service domain and the
 # trusted proxies (docs/contracts.md §8). Defined even when empty: envsubst only replaces set variables.
