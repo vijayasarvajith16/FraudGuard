@@ -24,23 +24,23 @@
   "dependencies": {
     "@prometheus-io/client": "^0.16.1",
     "amqplib": "^2.2.0",
-    "express": "^5.2.1",
+    "express": "^5.3.0",
     "helmet": "^8.3.0",
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^6.21.0",
-    "pino": "^10.3.1",
+    "pino": "^10.4.0",
     "pino-http": "^11.0.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.11.0",
+    "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-jest": "^29.16.6",
-    "globals": "^17.12.0",
+    "eslint-plugin-jest": "^29.17.0",
+    "globals": "^17.13.0",
     "jest": "^30.5.2",
     "mongodb-memory-server": "^11.3.0",
-    "prettier": "^3.9.9",
-    "supertest": "^7.3.0"
+    "prettier": "^3.9.10",
+    "supertest": "^7.3.1"
   }
 }
