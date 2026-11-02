@@ -14,7 +14,7 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 RUN npm run build
 
 # ---- runtime: official unprivileged Nginx (uid 101), static files only ----
-FROM nginxinc/nginx-unprivileged:1.30.5-alpine
+FROM nginxinc/nginx-unprivileged:1.30.6-alpine
 
 ENV NGINX_CSP_CONNECT_SRC="'self'" \
     NGINX_ENVSUBST_FILTER="^NGINX_"
