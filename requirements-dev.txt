@@ -1,5 +1,5 @@
 # Repo-level developer tools (the root .venv, created by `make install`):
 # e2e tests, gateway black-box tests, tools/ tests, and the git hooks.
-pytest==9.1.1
-ruff==0.16.9
-pre-commit==4.6.2
+pytest==9.2.0
+ruff==0.17.3
+pre-commit==4.7.0
